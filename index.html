@@ -112,6 +112,7 @@ function occ(t,m){const s=t.date.slice(0,7);if(!t.repeat)return s===m?1:0;return
 function occTo(t,m){const s=t.date.slice(0,7);if(s>m)return 0;if(!t.repeat)return 1;const e=t.until&&t.until<m?t.until:m;if(e<s)return 0;const a=mi(s),b=mi(e);return(b.y-a.y)*12+b.o-a.o+1}
 const dayOf=(t,m)=>Math.min(+t.date.slice(8,10),mi(m).n);
 function eff(t){
+ if(t.skipAcct)return[];
  if(t.type==="income")return[[t.acct,t.amount]];
  if(t.type==="expense")return[[t.acct,-t.amount]];
  if(t.type==="transfer")return[[t.acct,-t.amount],[t.to,t.amount]];
@@ -122,24 +123,27 @@ function title(t){const p=esc(t.person||"");
  if(t.type==="transfer")return"Transfer";
  return{borrow:"Borrowed from "+p,repay:"Paid back "+p,lend:"Lent to "+p,collect:p+" paid back",hold:"Keeping for "+p,hand:"Returned to "+p}[t.kind]}
 function sub(t){
- if(t.type==="income")return acc(t.acct).name+(t.repeat?" · monthly":"");
- if(t.type==="expense")return cat(t.cat).n+" · "+acc(t.acct).name+(t.repeat?" · monthly":"");
+ const tag=t.skipAcct?" · past record":"";
+ if(t.type==="income")return acc(t.acct).name+tag+(t.repeat?" · monthly":"");
+ if(t.type==="expense")return cat(t.cat).n+" · "+acc(t.acct).name+tag+(t.repeat?" · monthly":"");
  if(t.type==="transfer")return acc(t.acct).name+" → "+acc(t.to).name;
- return acc(t.acct).name+(t.note?" · "+t.note:"")}
+ return acc(t.acct).name+tag+(t.note?" · "+t.note:"")}
 function sign(t){return t.type==="transfer"?0:eff(t)[0][1]>0?1:-1}
 
 function calc(){
- const now=ym(new Date()),bal={},held={},P={};
- S.accounts.forEach(a=>{bal[a.id]=+a.open||0;held[a.id]=0});
+ const now=ym(new Date()),bal={},held={},lent={},owe={},P={};
+ S.accounts.forEach(a=>{bal[a.id]=+a.open||0;held[a.id]=0;lent[a.id]=0;owe[a.id]=0});
  for(const t of S.txs){const n=occTo(t,now);if(!n)continue;
   for(const[a,d]of eff(t))if(a in bal)bal[a]+=d*n;
   if(t.type==="people"){const k=t.person.trim().toLowerCase(),v=t.amount*n;
    const p=P[k]=P[k]||{name:t.person.trim(),owe:0,owed:0,held:0};
-   if(t.kind==="borrow")p.owe+=v;if(t.kind==="repay")p.owe-=v;
-   if(t.kind==="lend")p.owed+=v;if(t.kind==="collect")p.owed-=v;
+   if(t.kind==="borrow"){p.owe+=v;if(t.acct in owe)owe[t.acct]+=v}
+   if(t.kind==="repay"){p.owe-=v;if(t.acct in owe)owe[t.acct]-=v}
+   if(t.kind==="lend"){p.owed+=v;if(t.acct in lent)lent[t.acct]+=v}
+   if(t.kind==="collect"){p.owed-=v;if(t.acct in lent)lent[t.acct]-=v}
    if(t.kind==="hold"){p.held+=v;if(t.acct in held)held[t.acct]+=v}
    if(t.kind==="hand"){p.held-=v;if(t.acct in held)held[t.acct]-=v}}}
- return{bal,held,P}}
+ return{bal,held,lent,owe,P}}
 function stats(m){
  const o={tin:0,spent:0,saved:0,byCat:{},byAcct:{},inc:{},rows:[]};
  for(const t of S.txs){if(!occ(t,m))continue;o.rows.push(t);
@@ -158,13 +162,17 @@ function render(){
 }
 
 function right(){
- const c=calc(),tot=sumv(c.bal),h=sumv(c.held),P=Object.values(c.P),owe=P.reduce((s,p)=>s+Math.max(p.owe,0),0),owed=P.reduce((s,p)=>s+Math.max(p.owed,0),0);
+ const c=calc(),tot=sumv(c.bal),totHeld=sumv(c.held),totLent=sumv(c.lent),totOwe=sumv(c.owe);
+ const netUser = tot + totLent - totHeld - totOwe;
+ const globShortage = totHeld > tot ? totHeld - Math.max(0, tot) : 0;
  return`<section><h2>Your money right now</h2>
- <button class="row" onclick="tab='c';render()"><span class="t">In all accounts</span><span class="a">${fmt(tot)}</span></button>
- ${h>.005?`<div class="row"><span class="t">Kept for others<br><small>Not yours to spend</small></span><span class="a out">− ${fmt(h)}</span></div>`:""}
- <div class="row"><span class="t"><b>Yours to use</b></span><span class="a in">${fmt(tot-h)}</span></div>
- ${owe>.005?`<button class="row" onclick="tab='p';render()"><span class="t">You owe others</span><span class="a out">${fmt(owe)}</span></button>`:""}
- ${owed>.005?`<button class="row" onclick="tab='p';render()"><span class="t">Others owe you</span><span class="a in">${fmt(owed)}</span></button>`:""}</section>`}
+ <button class="row" onclick="tab='c';render()"><span class="t">Cash in all accounts</span><span class="a">${fmt(tot)}</span></button>
+ ${totHeld>.005?`<button class="row" onclick="tab='p';render()"><span class="t" style="color:var(--out)"><b>Someone’s money kept with you</b><br><small style="color:var(--out)">Not yours to spend</small></span><span class="a out">− ${fmt(totHeld)}</span></button>`:""}
+ ${totLent>.005?`<button class="row" onclick="tab='p';render()"><span class="t" style="color:var(--in)"><b>Money you lent</b><br><small>Has to come back</small></span><span class="a in">+ ${fmt(totLent)}</span></button>`:""}
+ ${totOwe>.005?`<button class="row" onclick="tab='p';render()"><span class="t" style="color:var(--out)"><b>You owe others (Borrowed)</b></span><span class="a out">− ${fmt(totOwe)}</span></button>`:""}
+ <div class="row" style="border-top:1.5px solid var(--line);padding-top:10px"><span class="t"><b>Your actual own money</b><br><small>Cash + Lent − Kept for others</small></span><span class="a ${netUser>=0?'in':'out'}" style="font-size:18px"><b>${fmt(netUser)}</b></span></div>
+ ${globShortage>.005?`<div style="background:rgba(200,69,31,0.08);border:1.5px solid var(--out);border-radius:10px;padding:10px 13px;margin-top:12px;font-size:13px;color:var(--ink);line-height:1.4"><b style="color:var(--out)">⚠️ Total cash shortage: ${fmt(globShortage)}</b><br>Total cash is <b>${fmt(tot)}</b>, but you are keeping <b>${fmt(totHeld)}</b> for others. Still short by <b>${fmt(globShortage)}</b> to give everyone back right now.</div>`:""}
+ </section>`}
 
 function vHome(){
  if(!S.txs.length)return`<div class="empty"><b>Let’s set this up</b>1. In Accounts, add your cash, banks and wallets with today’s balance.<br>2. Add your salary as income, then your spending.<br>3. Borrowed, lent or kept-for-someone money goes under People.<br><br><button class="btn" onclick="tab='c';render()">Set up accounts</button></div>`;
@@ -191,13 +199,89 @@ function vAct(){
  const g={};rows.forEach(t=>(g[dayOf(t,M)]=g[dayOf(t,M)]||[]).push(t));
  const{y,o}=mi(M);
  Object.keys(g).sort((a,b)=>b-a).forEach(d=>{h+=`<div class="day">${new Date(y,o-1,+d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}</div>`;
-  g[d].forEach(t=>{const s=sign(t);h+=`<button class="row" onclick="openTx('${t.id}')"><span class="t"><div>${title(t)}</div><small>${esc(sub(t))}</small></span><span class="a ${s>0?"in":s<0?"out":""}">${s>0?"+":s<0?"−":""}${fmt(t.amount)}</span></button>`})});
+  g[d].forEach(t=>{const s=sign(t);const cls=t.skipAcct?"":(s>0?"in":s<0?"out":"");const pfx=t.skipAcct?"":(s>0?"+":s<0?"−":"");h+=`<button class="row" onclick="openTx('${t.id}')"><span class="t"><div>${title(t)}</div><small>${esc(sub(t))}</small></span><span class="a ${cls}">${pfx}${fmt(t.amount)}</span></button>`})});
  return h+"</section>"}
 
 function vAcct(){
  const c=calc();
- return right()+`<section><h2>Accounts</h2>${S.accounts.map(a=>`<button class="row" onclick="editAcct('${a.id}')"><span class="t"><div>${esc(a.name)}</div>${c.held[a.id]>.005?`<small>Includes ${fmt(c.held[a.id])} kept for others</small>`:""}</span><span class="a ${c.bal[a.id]<0?"out":""}">${fmt(c.bal[a.id])}</span></button>`).join("")}
- <p class="note" style="margin-top:12px">Add every place you keep money: cash, each bank, wallets. Tap one to rename or fix its balance.</p></section>`}
+ return right()+`<section><h2>Accounts (Sources)</h2>${S.accounts.map(a=>{
+  const b=c.bal[a.id]||0, h=c.held[a.id]||0, l=c.lent[a.id]||0, o=c.owe[a.id]||0;
+  const myMoney = b + l - h - o;
+  let subText = [];
+  if(h>.005) subText.push(`<span style="color:var(--out)">Kept: −${fmt(h)}</span>`);
+  if(l>.005) subText.push(`<span style="color:var(--in)">Lent: +${fmt(l)}</span>`);
+  if(h>b) subText.push(`<span style="color:var(--out);font-weight:600">Shortage: −${fmt(h-b)}</span>`);
+  subText.push(`<span>Your money: <b>${fmt(myMoney)}</b></span>`);
+  return`<button class="row" onclick="viewSource('${a.id}')"><span class="t"><div><b>${esc(a.name)}</b></div><small>${subText.join(" · ")}</small></span><span class="a ${b<0?'out':''}">${fmt(b)}<small>balance</small></span></button>`}).join("")}
+ <p class="note" style="margin-top:12px">Tap any source to see its complete clarity breakdown (your money vs someone’s money vs shortage).</p></section>`}
+
+function viewSource(id){
+ const a=S.accounts.find(x=>x.id===id)||{name:""};
+ const c=calc(), b=c.bal[id]||0, h=c.held[id]||0, l=c.lent[id]||0, o=c.owe[id]||0;
+ const myMoney = b + l - h - o;
+
+ const heldMap = {}, lentMap = {};
+ for(const t of S.txs){
+  if(t.type==='people'&&t.acct===id){
+   const k = t.person.trim();
+   if(t.kind==='hold') heldMap[k] = (heldMap[k]||0) + t.amount;
+   if(t.kind==='hand') heldMap[k] = (heldMap[k]||0) - t.amount;
+   if(t.kind==='lend') lentMap[k] = (lentMap[k]||0) + t.amount;
+   if(t.kind==='collect') lentMap[k] = (lentMap[k]||0) - t.amount;
+  }
+ }
+ const heldList = Object.entries(heldMap).filter(([k,v])=>v>0.005).map(([person,amount])=>({person, amount}));
+ const lentList = Object.entries(lentMap).filter(([k,v])=>v>0.005).map(([person,amount])=>({person, amount}));
+ const heldPeopleStr = heldList.map(x=>`${esc(x.person)} (${fmt(x.amount)})`).join(", ");
+ const lentPeopleStr = lentList.map(x=>`${esc(x.person)} (${fmt(x.amount)})`).join(", ");
+
+ let shortageHtml = "";
+ if(h > 0.005){
+  if(b >= h){
+   shortageHtml = `<div style="background:rgba(11,122,99,0.08);border:1px solid var(--in);border-radius:10px;padding:11px 13px;margin-top:12px;font-size:13.5px;color:var(--in);line-height:1.4">
+    <b>✓ No cash shortage</b><br>
+    Your cash balance (${fmt(b)}) fully covers all ${fmt(h)} kept for others.
+   </div>`;
+  } else {
+   const totalShortage = h - Math.max(0, b);
+   let remCash = Math.max(0, b);
+   const parts = [];
+   for(const item of heldList){
+    const covered = Math.min(remCash, item.amount);
+    const shortage = item.amount - covered;
+    remCash -= covered;
+    if(shortage > 0.005){
+     parts.push(`<b>${esc(item.person)}</b> (short by ${fmt(shortage)})`);
+    }
+   }
+   let recoveryNote = "";
+   if(l > 0.005){
+    recoveryNote = `<div style="margin-top:6px;font-size:12.5px;color:var(--ink);opacity:.9">Once ${fmt(l)} lent to ${lentList.map(x=>esc(x.person)).join(", ")} is collected, your shortage will be cleared with ${fmt(myMoney)} left for you.</div>`;
+   }
+   shortageHtml = `<div style="background:rgba(200,69,31,0.08);border:1.5px solid var(--out);border-radius:10px;padding:12px 14px;margin-top:12px;font-size:13.5px;color:var(--out)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px">⚠️ Cash shortage: ${fmt(totalShortage)}</div>
+    <div style="color:var(--ink);line-height:1.4">
+     Balance is <b>${fmt(b)}</b>. Still you need <b>${fmt(totalShortage)}</b> to give back: ${parts.join(", ")}.
+    </div>
+    ${recoveryNote}
+   </div>`;
+  }
+ }
+
+ sheet(`${esc(a.name)} Breakdown`,`
+  <div style="background:var(--bg);border-radius:12px;padding:14px;margin-bottom:14px">
+   <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span>Cash balance in account:</span><b>${fmt(b)}</b></div>
+   ${h>.005?`<div style="display:flex;justify-content:space-between;color:var(--out);margin-bottom:8px"><span>Someone’s money kept (RED):<br><small>${heldPeopleStr||'Kept for others'}</small></span><b>− ${fmt(h)}</b></div>`:""}
+   ${l>.005?`<div style="display:flex;justify-content:space-between;color:var(--in);margin-bottom:8px"><span>Money you lent (to come back):<br><small>${lentPeopleStr||'Pending loans'}</small></span><b>+ ${fmt(l)}</b></div>`:""}
+   ${o>.005?`<div style="display:flex;justify-content:space-between;color:var(--out);margin-bottom:8px"><span>You owe from here:</span><b>− ${fmt(o)}</b></div>`:""}
+   <div style="display:flex;justify-content:space-between;border-top:1.5px solid var(--line);padding-top:10px;font-size:17px"><span><b>Your actual money here:</b></span><b class="${myMoney>=0?'in':'out'}">${fmt(myMoney)}</b></div>
+   ${shortageHtml}
+  </div>
+  <div class="acts">
+   <button class="btn" onclick="editAcct('${id}')">Edit / Calibrate balance</button>
+   <button class="btn sec" onclick="closeSheet()">Close</button>
+  </div>
+ `)}
 
 function vPeople(){
  const c=calc(),L=Object.entries(c.P),open=L.filter(([k,p])=>[p.owe,p.owed,p.held].some(x=>Math.abs(x)>.005));
@@ -230,23 +314,38 @@ function addNew(){tab==="c"?editAcct():openTx("",tab==="p"?{type:"people"}:{})}
 /* entry form */
 function openTx(id,pre){
  const t=id&&S.txs.find(x=>x.id===id),a=S.accounts;
- D=t?{...t}:{id:"",type:"expense",amount:"",date:M===ym(new Date())?ymd(new Date()):M+"-01",acct:a[0].id,to:(a[1]||a[0]).id,cat:"groc",kind:"borrow",person:"",note:"",repeat:false,until:"",...pre};
+ D=t?{...t}:{id:"",type:"expense",amount:"",date:M===ym(new Date())?ymd(new Date()):M+"-01",acct:a[0].id,to:(a[1]||a[0]).id,cat:"groc",kind:"borrow",person:"",note:"",repeat:false,until:"",skipAcct:false,...pre};
  form()}
 function readD(){const g=(i,k)=>{const e=$("#"+i);if(e)D[k]=e.value};
  g("fa","amount");g("fd","date");g("fs","acct");g("ft","to");g("fc","cat");g("fk","kind");g("fp","person");g("fn","note");g("fu","until");const r=$("#fr");if(r)D.repeat=r.checked}
+function setBalEffect(s){readD();D.skipAcct=!!s;form()}
 function setType(x){readD();D.type=x;form()}
 function form(){
  const t=D.type,opt=(l,sel)=>l.map(([v,n])=>`<option value="${v}" ${v===sel?"selected":""}>${esc(n)}</option>`).join(""),ao=S.accounts.map(a=>[a.id,a.name]);
- const acct=(id,l,sel)=>`<label>${l}</label><select id="${id}">${opt(ao,sel)}</select>`;
+ const acct=(id,l,sel)=>`<label><b>${l}</b></label><select id="${id}">${opt(ao,sel)}</select>`;
  const names=[...new Set(S.txs.filter(x=>x.type==="people").map(x=>x.person.trim()))];
  let h=`<div class="seg">${[["expense","Expense"],["income","Income"],["transfer","Transfer"],["people","People"]].map(([k,l])=>`<button class="${t===k?"on":""}" onclick="setType('${k}')">${l}</button>`).join("")}</div>
  <label>Amount</label><input id="fa" inputmode="decimal" value="${D.amount}" placeholder="0">`;
- if(t==="expense")h+=`<label>Category</label><select id="fc">${opt(CATS.map(c=>[c.id,c.n]),D.cat)}</select>`+acct("fs","Paid from",D.acct)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. Rent, Swiggy, petrol">`;
- if(t==="income")h+=`<label>What is it?</label><input id="fn" value="${esc(D.note)}" placeholder="Salary, business, interest…"><div class="chips">${["Salary","Business","Interest","Other"].map(n=>`<button onclick="$('#fn').value='${n}'">${n}</button>`).join("")}</div>`+acct("fs","Received in",D.acct);
- if(t==="transfer")h+=acct("fs","From",D.acct)+acct("ft","To",D.to)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}">`;
+ if(t==="expense")h+=`<label>Category</label><select id="fc">${opt(CATS.map(c=>[c.id,c.n]),D.cat)}</select>`+acct("fs","Paid from (Source account)",D.acct)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. Rent, Swiggy, petrol">`;
+ if(t==="income")h+=`<label>What is it?</label><input id="fn" value="${esc(D.note)}" placeholder="Salary, business, interest…"><div class="chips">${["Salary","Business","Interest","Other"].map(n=>`<button onclick="$('#fn').value='${n}'">${n}</button>`).join("")}</div>`
+  +acct("fs","Received in (Source account)",D.acct)
+  +`<label><b>Income type</b></label>
+   <div class="seg" style="margin-top:6px;margin-bottom:6px">
+    <button type="button" class="${!D.skipAcct?"on":""}" onclick="setBalEffect(false)">+ New incoming money</button>
+    <button type="button" class="${D.skipAcct?"on":""}" onclick="setBalEffect(true)">Old record (keep balance)</button>
+   </div>
+   <p class="note" style="margin:2px 0 10px">${D.skipAcct?"Keeps account balance as is. Just logs this income in stats.":"Adds this amount (+) to your account balance."}</p>`;
+ if(t==="transfer")h+=acct("fs","From (Source account)",D.acct)+acct("ft","To (Destination account)",D.to)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}">`;
  if(t==="people")h+=`<label>What happened?</label><select id="fk" onchange="readD();form()">${opt(Object.entries(KINDS).map(([k,v])=>[k,v.l]),D.kind)}</select>
   <label>Person</label><input id="fp" list="pl" value="${esc(D.person)}" placeholder="Name"><datalist id="pl">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`
-  +acct("fs",KINDS[D.kind].in?"Money came into":"Money went out of",D.acct)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. for medical, 2 months">`;
+  +acct("fs",KINDS[D.kind].in?"Money came into (Source account)":"Money went out of (Source account)",D.acct)
+  +`<label><b>Transaction type</b></label>
+   <div class="seg" style="margin-top:6px;margin-bottom:6px">
+    <button type="button" class="${!D.skipAcct?"on":""}" onclick="setBalEffect(false)">${KINDS[D.kind].in?"+ New incoming (adds)":"− Live payment (deducts)"}</button>
+    <button type="button" class="${D.skipAcct?"on":""}" onclick="setBalEffect(true)">Old record (keep balance)</button>
+   </div>
+   <p class="note" style="margin:2px 0 10px">${D.skipAcct?"Keeps current account balance as is. Just saves the record to track who owes what.":(KINDS[D.kind].in?"Adds this amount (+) to your account balance.":"Deducts this amount (−) from your account balance.")}</p>`
+  +`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. for medical, 2 months">`;
  h+=`<label>Date</label><input id="fd" type="date" value="${D.date}">`;
  if(t==="expense"||t==="income")h+=`<label class="chk"><input id="fr" type="checkbox" ${D.repeat?"checked":""} onchange="$('#fuw').style.display=this.checked?'':'none'"> Repeats every month</label><div id="fuw" style="${D.repeat?"":"display:none"}"><label>Last month it counts (optional)</label><input id="fu" type="month" value="${D.until||""}"></div>`;
  h+=`<div class="acts">${D.id?`<button class="btn del" onclick="delTx()">Delete</button>`:`<button class="btn sec" onclick="closeSheet()">Cancel</button>`}<button class="btn" onclick="saveTx()">Save</button></div>`;
@@ -258,7 +357,7 @@ function saveTx(){
  if(t==="people"&&!D.person.trim())return $("#fp").focus();
  if(t==="transfer"&&D.acct===D.to)return alert("Pick two different accounts.");
  const o={id:D.id||uid(),type:t,amount:amt,date:D.date||ymd(new Date()),acct:D.acct,note:(D.note||"").trim()};
- if(t==="expense")o.cat=D.cat;if(t==="transfer")o.to=D.to;if(t==="people"){o.kind=D.kind;o.person=D.person.trim()}
+ if(t==="expense")o.cat=D.cat;if(t==="transfer")o.to=D.to;if(t==="people"){o.kind=D.kind;o.person=D.person.trim()}o.skipAcct=!!D.skipAcct;
  if(t==="expense"||t==="income"){o.repeat=!!D.repeat;o.until=D.repeat?D.until:""}
  const i=S.txs.findIndex(x=>x.id===o.id);i>=0?S.txs[i]=o:S.txs.push(o);
  if(!o.repeat&&(tab==="o"||tab==="a"))M=o.date.slice(0,7);
@@ -267,12 +366,26 @@ function delTx(){S.txs=S.txs.filter(x=>x.id!==D.id);save();closeSheet();render()
 
 function editAcct(id){
  const a=S.accounts.find(x=>x.id===id)||{name:"",open:""};
+ const c=calc();
+ const curVal = id && id in c.bal ? c.bal[id] : a.open;
  sheet(id?"Edit account":"New account",`<label>Name</label><input id="an" value="${esc(a.name)}" placeholder="HDFC, BOB, Karnataka Bank, Cash…">
- <label>${id?"Opening balance (before the entries you added)":"Balance right now"}</label><input id="ab" inputmode="decimal" value="${a.open}" placeholder="0">
+ <label>Balance right now (in your bank/cash today)</label><input id="ab" inputmode="decimal" value="${curVal}" placeholder="0">
+ <p class="note">Enter what is actually in this account today. It automatically calibrates your balance to match reality.</p>
  <div class="acts">${id?`<button class="btn del" onclick="delAcct('${id}')">Delete</button>`:`<button class="btn sec" onclick="closeSheet()">Cancel</button>`}<button class="btn" onclick="saveAcct('${id||""}')">Save</button></div>`)}
 function saveAcct(id){
  const n=$("#an").value.trim();if(!n)return $("#an").focus();
- const o={id:id||uid(),name:n,open:parseFloat($("#ab").value.replace(/,/g,""))||0};
+ const targetBal=parseFloat($("#ab").value.replace(/,/g,""))||0;
+ let openVal=targetBal;
+ if(id){
+  const now=ym(new Date());
+  let txSum=0;
+  for(const t of S.txs){
+   const n=occTo(t,now);if(!n)continue;
+   for(const[a,d]of eff(t))if(a===id)txSum+=d*n;
+  }
+  openVal = targetBal - txSum;
+ }
+ const o={id:id||uid(),name:n,open:openVal};
  const i=S.accounts.findIndex(x=>x.id===o.id);i>=0?S.accounts[i]=o:S.accounts.push(o);save();closeSheet();render()}
 function delAcct(id){
  if(S.accounts.length<2)return alert("Keep at least one account.");
