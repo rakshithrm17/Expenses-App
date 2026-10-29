@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Where it goes">
+<meta name="theme-color" content="#17252A">
+<title>Where it goes</title>
+<style>
+:root{--bg:#EDF1EF;--card:#fff;--ink:#17252A;--mute:#5E6F73;--line:#D8E0DD;--in:#0B7A63;--out:#C8451F;--free:#CBD8D4;--hero:#17252A;--heroink:#F2F7F5}
+@media(prefers-color-scheme:dark){:root{--bg:#0E181A;--card:#17262A;--ink:#E7EFED;--mute:#93A6A9;--line:#2A4146;--in:#3DC3A2;--out:#F07A56;--free:#2E4549;--hero:#1F3A3A}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"SF Pro Text",system-ui,Roboto,sans-serif;font-variant-numeric:tabular-nums}
+body{padding:env(safe-area-inset-top) 0 calc(150px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto}
+button,input,select{font:inherit;color:inherit}button{cursor:pointer}
+.mnav{display:flex;align-items:center;justify-content:space-between;padding:10px 12px}
+.mnav b{font-size:17px;font-weight:650}
+.mnav button{background:none;border:0;font-size:26px;width:44px;height:44px;color:var(--mute)}
+.hero{background:var(--hero);color:#F2F7F5;padding:22px 20px 20px;margin:0 0 18px}
+.hero small{opacity:.75;font-size:14px}
+.hero .big{font-size:46px;font-weight:700;letter-spacing:-1px;line-height:1.1;margin:2px 0 14px}
+.hero .big.neg{color:#FFB199}
+.trio{display:flex;gap:18px;font-size:14px}
+.trio span{display:block;opacity:.7;font-size:12.5px}
+.trio b{font-size:16px}
+section{padding:0 16px;margin-bottom:26px}
+h2{font-size:17px;margin:0 0 10px;font-weight:650}
+.bar{display:flex;gap:2px;height:30px;border-radius:9px;overflow:hidden;margin-bottom:14px}
+.bar i{display:block;min-width:3px}.bar i.free{background:var(--free)}
+.row{display:flex;align-items:center;gap:10px;padding:11px 0;border:0;border-bottom:1px solid var(--line);width:100%;background:none;text-align:left}
+.row:last-child{border-bottom:0}
+.dot{width:12px;height:12px;border-radius:4px;flex:none}
+.row .t{flex:1;min-width:0}
+.row .t div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row small{color:var(--mute);font-size:13px;font-weight:400}
+.row .a{text-align:right;font-weight:600}.row .a small{display:block}
+.in{color:var(--in)}.out{color:var(--out)}
+.day{font-size:13px;color:var(--mute);margin:16px 0 0;font-weight:600}
+.mini{height:8px;border-radius:4px;background:var(--free);overflow:hidden;margin-top:6px}
+.mini i{display:block;height:100%;background:var(--ink);opacity:.8}
+.empty{padding:34px 24px;text-align:center;color:var(--mute)}
+.empty b{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
+.btn{border:0;border-radius:12px;padding:13px 18px;font-weight:650;background:var(--ink);color:var(--bg)}
+.btn.sec{background:none;border:1.5px solid var(--line);color:var(--ink)}
+.btn.del{background:none;color:var(--out)}
+.pill{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--in);color:#fff;border:0;border-radius:26px;padding:14px 20px;font-weight:650;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:5}
+.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:6}
+.tabs button{flex:1;background:none;border:0;padding:9px 0 8px;font-size:11.5px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:3px}
+.tabs button.on{color:var(--ink);font-weight:650}
+.tabs svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:20}
+#scrim.on{display:flex}
+#sheet{background:var(--card);width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:92%;overflow:auto}
+#sheet h3{margin:0 0 12px;font-size:19px}
+label{display:block;font-size:13.5px;color:var(--mute);margin:12px 0 4px}
+input,select{width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);font-size:16px}
+.chk{display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--ink);font-size:15px}
+.chk input{width:22px;height:22px;flex:none}
+.acts{display:flex;gap:10px;margin-top:18px}.acts .btn{flex:1}
+.seg{display:flex;gap:6px}
+.seg button{flex:1;padding:10px 0;border-radius:10px;border:1.5px solid var(--line);background:none;font-size:14.5px}
+.seg .on{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:650}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.chips button{border:1.5px solid var(--line);background:none;border-radius:18px;padding:6px 12px;font-size:14px}
+p.note{color:var(--mute);font-size:14px;margin:6px 0 12px}
+</style>
+</head>
+<body>
+<main id="view"></main>
+<button class="pill" id="add" onclick="addNew()"></button>
+<nav class="tabs" id="tabs"></nav>
+<div id="scrim" onclick="if(event.target===this)closeSheet()"><div id="sheet"></div></div>
+
+<script>
+const KEY="where-it-goes-v2";
+const CATS=[
+{id:"home",n:"Rent & home",c:"#3F6C8F"},{id:"groc",n:"Groceries",c:"#7BA23F"},{id:"food",n:"Eating out",c:"#D9822B"},
+{id:"move",n:"Transport",c:"#8A5CC2"},{id:"bills",n:"Bills & recharge",c:"#2E9CA6"},{id:"emi",n:"EMI & loans",c:"#B5483A"},
+{id:"shop",n:"Shopping",c:"#D2578C"},{id:"health",n:"Health",c:"#4FA36B"},{id:"fun",n:"Fun & subscriptions",c:"#C7A12B"},
+{id:"trip",n:"Travel",c:"#5B74C9"},{id:"fam",n:"Family & gifts",c:"#A06A4B"},{id:"save",n:"Savings & investing",c:"#0B7A63",sv:1},{id:"other",n:"Other",c:"#7A8A8D"}];
+const KINDS={borrow:{l:"I borrowed from someone",in:1},repay:{l:"I paid back someone",in:0},lend:{l:"I lent to someone",in:0},collect:{l:"Someone paid me back",in:1},hold:{l:"Someone gave me money to keep",in:1},hand:{l:"I returned money kept with me",in:0}};
+const cat=id=>CATS.find(c=>c.id===id)||CATS[CATS.length-1];
+let S=load(),M=ym(new Date()),tab="o",ft="",fAcct="",fcat="",D=null;
+
+function def(){return{cur:"INR",accounts:[{id:"cash",name:"Cash",open:0}],txs:[]}}
+function load(){
+ try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&r.accounts&&r.txs)return Object.assign(def(),r)}catch(e){}
+ const s=def();
+ try{const o=JSON.parse(localStorage.getItem("where-it-goes-v1"));if(o){
+  (o.incomes||[]).forEach(i=>s.txs.push({id:i.id,type:"income",amount:i.amount,acct:"cash",note:i.name,date:i.from+"-01",repeat:i.type!=="once",until:i.until||""}));
+  (o.expenses||[]).forEach(e=>s.txs.push({id:e.id,type:"expense",amount:e.amount,acct:"cash",cat:e.cat,note:e.note||"",date:e.date,repeat:!!e.repeat}));
+  s.cur=o.cur||"INR"}}catch(e){}
+ return s}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function ym(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")}
+function ymd(d){return ym(d)+"-"+String(d.getDate()).padStart(2,"0")}
+function mi(m){const[y,o]=m.split("-").map(Number);return{y,o,n:new Date(y,o,0).getDate()}}
+function mname(m){const{y,o}=mi(m);return new Date(y,o-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"})}
+function shift(m,k){const{y,o}=mi(m);return ym(new Date(y,o-1+k,1))}
+function fmt(n){return new Intl.NumberFormat(S.cur==="INR"?"en-IN":"en-US",{style:"currency",currency:S.cur,maximumFractionDigits:0}).format(n)}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const $=s=>document.querySelector(s);
+const acc=id=>S.accounts.find(a=>a.id===id)||{name:"Deleted account"};
+const sumv=o=>Object.values(o).reduce((a,b)=>a+b,0);
+
+/* how many times an entry counts in month m / up to month m */
+function occ(t,m){const s=t.date.slice(0,7);if(!t.repeat)return s===m?1:0;return s>m||(t.until&&m>t.until)?0:1}
+function occTo(t,m){const s=t.date.slice(0,7);if(s>m)return 0;if(!t.repeat)return 1;const e=t.until&&t.until<m?t.until:m;if(e<s)return 0;const a=mi(s),b=mi(e);return(b.y-a.y)*12+b.o-a.o+1}
+const dayOf=(t,m)=>Math.min(+t.date.slice(8,10),mi(m).n);
+function eff(t){
+ if(t.type==="income")return[[t.acct,t.amount]];
+ if(t.type==="expense")return[[t.acct,-t.amount]];
+ if(t.type==="transfer")return[[t.acct,-t.amount],[t.to,t.amount]];
+ return[[t.acct,KINDS[t.kind].in?t.amount:-t.amount]]}
+function title(t){const p=esc(t.person||"");
+ if(t.type==="income")return esc(t.note||"Income");
+ if(t.type==="expense")return esc(t.note||cat(t.cat).n);
+ if(t.type==="transfer")return"Transfer";
+ return{borrow:"Borrowed from "+p,repay:"Paid back "+p,lend:"Lent to "+p,collect:p+" paid back",hold:"Keeping for "+p,hand:"Returned to "+p}[t.kind]}
+function sub(t){
+ if(t.type==="income")return acc(t.acct).name+(t.repeat?" · monthly":"");
+ if(t.type==="expense")return cat(t.cat).n+" · "+acc(t.acct).name+(t.repeat?" · monthly":"");
+ if(t.type==="transfer")return acc(t.acct).name+" → "+acc(t.to).name;
+ return acc(t.acct).name+(t.note?" · "+t.note:"")}
+function sign(t){return t.type==="transfer"?0:eff(t)[0][1]>0?1:-1}
+
+function calc(){
+ const now=ym(new Date()),bal={},held={},P={};
+ S.accounts.forEach(a=>{bal[a.id]=+a.open||0;held[a.id]=0});
+ for(const t of S.txs){const n=occTo(t,now);if(!n)continue;
+  for(const[a,d]of eff(t))if(a in bal)bal[a]+=d*n;
+  if(t.type==="people"){const k=t.person.trim().toLowerCase(),v=t.amount*n;
+   const p=P[k]=P[k]||{name:t.person.trim(),owe:0,owed:0,held:0};
+   if(t.kind==="borrow")p.owe+=v;if(t.kind==="repay")p.owe-=v;
+   if(t.kind==="lend")p.owed+=v;if(t.kind==="collect")p.owed-=v;
+   if(t.kind==="hold"){p.held+=v;if(t.acct in held)held[t.acct]+=v}
+   if(t.kind==="hand"){p.held-=v;if(t.acct in held)held[t.acct]-=v}}}
+ return{bal,held,P}}
+function stats(m){
+ const o={tin:0,spent:0,saved:0,byCat:{},byAcct:{},inc:{},rows:[]};
+ for(const t of S.txs){if(!occ(t,m))continue;o.rows.push(t);
+  if(t.type==="income"){o.tin+=t.amount;const k=t.note||"Income";o.inc[k]=(o.inc[k]||0)+t.amount}
+  if(t.type==="expense"){o.byCat[t.cat]=(o.byCat[t.cat]||0)+t.amount;
+   if(cat(t.cat).sv)o.saved+=t.amount;else{o.spent+=t.amount;o.byAcct[t.acct]=(o.byAcct[t.acct]||0)+t.amount}}}
+ o.left=o.tin-o.spent-o.saved;return o}
+
+function render(){
+ const lb={o:"Home",a:"Activity",c:"Accounts",p:"People",m:"More"};
+ const ic={o:'<path d="M4 11l8-7 8 7v9H4z"/>',a:'<path d="M5 7h14M5 12h14M5 17h9"/>',c:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/>',p:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6M16 5a3 3 0 010 6M18 14c2 .6 3 2.500 3 6"/>',m:'<path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/>'};
+ $("#add").textContent=tab==="c"?"Add account":"Add entry";$("#add").style.display=tab==="m"?"none":"";
+ $("#tabs").innerHTML=Object.keys(ic).map(k=>`<button class="${tab===k?"on":""}" onclick="tab='${k}';render();scrollTo(0,0)"><svg viewBox="0 0 24 24">${ic[k]}</svg>${lb[k]}</button>`).join("");
+ const nav=tab==="o"||tab==="a"?`<div class="mnav"><button onclick="M=shift(M,-1);render()" aria-label="Previous month">‹</button><b>${mname(M)}</b><button onclick="M=shift(M,1);render()" aria-label="Next month">›</button></div>`:"";
+ $("#view").innerHTML=nav+({o:vHome,a:vAct,c:vAcct,p:vPeople,m:vMore}[tab])();
+}
+
+function right(){
+ const c=calc(),tot=sumv(c.bal),h=sumv(c.held),P=Object.values(c.P),owe=P.reduce((s,p)=>s+Math.max(p.owe,0),0),owed=P.reduce((s,p)=>s+Math.max(p.owed,0),0);
+ return`<section><h2>Your money right now</h2>
+ <button class="row" onclick="tab='c';render()"><span class="t">In all accounts</span><span class="a">${fmt(tot)}</span></button>
+ ${h>.005?`<div class="row"><span class="t">Kept for others<br><small>Not yours to spend</small></span><span class="a out">− ${fmt(h)}</span></div>`:""}
+ <div class="row"><span class="t"><b>Yours to use</b></span><span class="a in">${fmt(tot-h)}</span></div>
+ ${owe>.005?`<button class="row" onclick="tab='p';render()"><span class="t">You owe others</span><span class="a out">${fmt(owe)}</span></button>`:""}
+ ${owed>.005?`<button class="row" onclick="tab='p';render()"><span class="t">Others owe you</span><span class="a in">${fmt(owed)}</span></button>`:""}</section>`}
+
+function vHome(){
+ if(!S.txs.length)return`<div class="empty"><b>Let’s set this up</b>1. In Accounts, add your cash, banks and wallets with today’s balance.<br>2. Add your salary as income, then your spending.<br>3. Borrowed, lent or kept-for-someone money goes under People.<br><br><button class="btn" onclick="tab='c';render()">Set up accounts</button></div>`;
+ const st=stats(M),base=Math.max(st.tin,st.spent+st.saved)||1,ents=Object.entries(st.byCat).sort((a,b)=>b[1]-a[1]);
+ const segs=ents.map(([id,v])=>`<i style="width:${v/base*100}%;background:${cat(id).c}"></i>`).join("")+(st.left>0?`<i class="free" style="width:${st.left/base*100}%"></i>`:"");
+ const pct=v=>st.tin>0?Math.round(v/st.tin*100)+"% of income":"";
+ const legend=ents.map(([id,v])=>`<button class="row" onclick="ft='expense';fcat='${id}';tab='a';render()"><span class="dot" style="background:${cat(id).c}"></span><span class="t">${cat(id).n}</span><span class="a">${fmt(v)}<small>${pct(v)}</small></span></button>`).join("")+(st.left>0?`<div class="row"><span class="dot" style="background:var(--free)"></span><span class="t">Not spent yet</span><span class="a">${fmt(st.left)}<small>${pct(st.left)}</small></span></div>`:"");
+ const ac=Object.entries(st.byAcct).sort((a,b)=>b[1]-a[1]),mx=ac.length?ac[0][1]:1,inc=Object.entries(st.inc).sort((a,b)=>b[1]-a[1]);
+ return`<div class="hero"><small>${st.left<0?"Over by":"Left this month"}</small><div class="big ${st.left<0?"neg":""}">${fmt(Math.abs(st.left))}</div>
+ <div class="trio"><div><span>Came in</span><b>${fmt(st.tin)}</b></div><div><span>Spent</span><b>${fmt(st.spent)}</b></div><div><span>Saved</span><b>${fmt(st.saved)}</b></div></div></div>
+ ${ents.length?`<section><h2>Where your income went</h2><div class="bar">${segs}</div>${legend}</section>`:""}
+ ${ac.length?`<section><h2>Spent from which account</h2>${ac.map(([k,v])=>`<div class="row" style="display:block"><div style="display:flex;justify-content:space-between"><span>${esc(acc(k).name)}</span><b>${fmt(v)}</b></div><div class="mini"><i style="width:${v/mx*100}%"></i></div></div>`).join("")}</section>`:""}
+ ${inc.length?`<section><h2>Income this month</h2>${inc.map(([k,v])=>`<div class="row"><span class="t">${esc(k)}</span><span class="a in">${fmt(v)}<small>${Math.round(v/st.tin*100)}%</small></span></div>`).join("")}</section>`:""}
+ ${right()}`}
+
+function vAct(){
+ let rows=stats(M).rows;
+ if(ft)rows=rows.filter(t=>t.type===ft);if(fAcct)rows=rows.filter(t=>t.acct===fAcct||t.to===fAcct);if(fcat)rows=rows.filter(t=>t.cat===fcat);
+ const so=(v,l)=>`<option value="${v}" ${ft===v?"selected":""}>${l}</option>`;
+ let h=`<section><div style="display:flex;gap:8px"><select onchange="ft=this.value;render()">${so("","Everything")+so("income","Income")+so("expense","Expenses")+so("transfer","Transfers")+so("people","People")}</select>
+ <select onchange="fAcct=this.value;render()"><option value="">All accounts</option>${S.accounts.map(a=>`<option value="${a.id}" ${fAcct===a.id?"selected":""}>${esc(a.name)}</option>`).join("")}</select></div>
+ ${fcat?`<div class="chips"><button onclick="fcat='';render()">${cat(fcat).n} ✕</button></div>`:""}<p class="note">${rows.length} entries</p>`;
+ if(!rows.length)return h+`<div class="empty"><b>Nothing here</b>Tap “Add entry” to record money in or out.</div></section>`;
+ const g={};rows.forEach(t=>(g[dayOf(t,M)]=g[dayOf(t,M)]||[]).push(t));
+ const{y,o}=mi(M);
+ Object.keys(g).sort((a,b)=>b-a).forEach(d=>{h+=`<div class="day">${new Date(y,o-1,+d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}</div>`;
+  g[d].forEach(t=>{const s=sign(t);h+=`<button class="row" onclick="openTx('${t.id}')"><span class="t"><div>${title(t)}</div><small>${esc(sub(t))}</small></span><span class="a ${s>0?"in":s<0?"out":""}">${s>0?"+":s<0?"−":""}${fmt(t.amount)}</span></button>`})});
+ return h+"</section>"}
+
+function vAcct(){
+ const c=calc();
+ return right()+`<section><h2>Accounts</h2>${S.accounts.map(a=>`<button class="row" onclick="editAcct('${a.id}')"><span class="t"><div>${esc(a.name)}</div>${c.held[a.id]>.005?`<small>Includes ${fmt(c.held[a.id])} kept for others</small>`:""}</span><span class="a ${c.bal[a.id]<0?"out":""}">${fmt(c.bal[a.id])}</span></button>`).join("")}
+ <p class="note" style="margin-top:12px">Add every place you keep money: cash, each bank, wallets. Tap one to rename or fix its balance.</p></section>`}
+
+function vPeople(){
+ const c=calc(),L=Object.entries(c.P),open=L.filter(([k,p])=>[p.owe,p.owed,p.held].some(x=>Math.abs(x)>.005));
+ if(!L.length)return`<div class="empty"><b>No one yet</b>Track money you borrowed, lent, or are keeping for someone, and see who owes what.<br><br><button class="btn" onclick="openTx('',{type:'people'})">Add entry</button></div>`;
+ return`<section style="padding-top:12px"><h2>Who owes what</h2>${open.map(([k,p])=>`<button class="row" onclick="person('${encodeURIComponent(k)}')"><span class="t">${esc(p.name)}</span><span class="a">${p.owe>.005?`<span class="out">You owe ${fmt(p.owe)}</span><br>`:""}${p.owed>.005?`<span class="in">Owes you ${fmt(p.owed)}</span><br>`:""}${p.held>.005?`<span>Keeping ${fmt(p.held)}</span>`:""}</span></button>`).join("")||`<p class="note">Everyone is settled.</p>`}
+ ${L.length>open.length?`<p class="note">${L.length-open.length} settled</p>`:""}</section>`}
+
+function person(k){
+ k=decodeURIComponent(k);const p=calc().P[k],now=ym(new Date());
+ const hist=S.txs.filter(t=>t.type==="people"&&t.person.trim().toLowerCase()===k).sort((a,b)=>b.date.localeCompare(a.date));
+ const B=(l,kind,amt)=>`<button class="btn" onclick="openTx('',{type:'people',kind:'${kind}',person:decodeURIComponent('${encodeURIComponent(p.name)}'),amount:${amt}})">${l}</button>`;
+ sheet(esc(p.name),`<div>${p.owe>.005?`<div class="out">You owe ${fmt(p.owe)}</div>`:""}${p.owed>.005?`<div class="in">Owes you ${fmt(p.owed)}</div>`:""}${p.held>.005?`<div>You are keeping ${fmt(p.held)} for them</div>`:""}</div>
+ <div class="acts" style="flex-wrap:wrap">${p.owe>.005?B("Pay back","repay",p.owe):""}${p.owed>.005?B("Got paid back","collect",p.owed):""}${p.held>.005?B("Hand back","hand",p.held):""}<button class="btn sec" onclick="openTx('',{type:'people',person:decodeURIComponent('${encodeURIComponent(p.name)}')})">New entry</button></div>
+ <h2 style="margin-top:20px">History</h2>${hist.map(t=>`<button class="row" onclick="openTx('${t.id}')"><span class="t"><div>${title(t)}</div><small>${t.date}</small></span><span class="a ${sign(t)>0?"in":"out"}">${sign(t)>0?"+":"−"}${fmt(t.amount)}</span></button>`).join("")}
+ <div class="acts"><button class="btn sec" onclick="closeSheet()">Close</button></div>`)}
+
+function vMore(){
+ return`<section style="padding-top:18px"><h2>Currency</h2><select onchange="S.cur=this.value;save();render()">${["INR","USD","EUR","GBP","AED"].map(c=>`<option ${S.cur===c?"selected":""}>${c}</option>`).join("")}</select></section>
+ <section><h2>Backup</h2><p class="note">Your data lives only in this browser. Save a backup file now and then, especially before clearing Safari data.</p>
+ <div class="acts"><button class="btn" onclick="exportData()">Save backup</button><button class="btn sec" onclick="$('#imp').click()">Restore</button></div>
+ <input type="file" id="imp" accept=".json,application/json" hidden onchange="importData(this)"></section>
+ <section><h2>Use on iPhone, offline</h2><p class="note">Open this page in Safari, tap Share, then “Add to Home Screen”. It then opens like an app and keeps working without internet.</p></section>
+ <section><button class="btn del" onclick="wipeAll()">Delete all data</button></section>`}
+function wipeAll(){if(confirm("Delete all accounts and entries on this device?")){const c=S.cur;S=def();S.cur=c;save();tab="o";render()}}
+
+function sheet(h,b){$("#sheet").innerHTML=`<h3>${h}</h3>${b}`;$("#scrim").classList.add("on")}
+function closeSheet(){$("#scrim").classList.remove("on")}
+function addNew(){tab==="c"?editAcct():openTx("",tab==="p"?{type:"people"}:{})}
+
+/* entry form */
+function openTx(id,pre){
+ const t=id&&S.txs.find(x=>x.id===id),a=S.accounts;
+ D=t?{...t}:{id:"",type:"expense",amount:"",date:M===ym(new Date())?ymd(new Date()):M+"-01",acct:a[0].id,to:(a[1]||a[0]).id,cat:"groc",kind:"borrow",person:"",note:"",repeat:false,until:"",...pre};
+ form()}
+function readD(){const g=(i,k)=>{const e=$("#"+i);if(e)D[k]=e.value};
+ g("fa","amount");g("fd","date");g("fs","acct");g("ft","to");g("fc","cat");g("fk","kind");g("fp","person");g("fn","note");g("fu","until");const r=$("#fr");if(r)D.repeat=r.checked}
+function setType(x){readD();D.type=x;form()}
+function form(){
+ const t=D.type,opt=(l,sel)=>l.map(([v,n])=>`<option value="${v}" ${v===sel?"selected":""}>${esc(n)}</option>`).join(""),ao=S.accounts.map(a=>[a.id,a.name]);
+ const acct=(id,l,sel)=>`<label>${l}</label><select id="${id}">${opt(ao,sel)}</select>`;
+ const names=[...new Set(S.txs.filter(x=>x.type==="people").map(x=>x.person.trim()))];
+ let h=`<div class="seg">${[["expense","Expense"],["income","Income"],["transfer","Transfer"],["people","People"]].map(([k,l])=>`<button class="${t===k?"on":""}" onclick="setType('${k}')">${l}</button>`).join("")}</div>
+ <label>Amount</label><input id="fa" inputmode="decimal" value="${D.amount}" placeholder="0">`;
+ if(t==="expense")h+=`<label>Category</label><select id="fc">${opt(CATS.map(c=>[c.id,c.n]),D.cat)}</select>`+acct("fs","Paid from",D.acct)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. Rent, Swiggy, petrol">`;
+ if(t==="income")h+=`<label>What is it?</label><input id="fn" value="${esc(D.note)}" placeholder="Salary, business, interest…"><div class="chips">${["Salary","Business","Interest","Other"].map(n=>`<button onclick="$('#fn').value='${n}'">${n}</button>`).join("")}</div>`+acct("fs","Received in",D.acct);
+ if(t==="transfer")h+=acct("fs","From",D.acct)+acct("ft","To",D.to)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}">`;
+ if(t==="people")h+=`<label>What happened?</label><select id="fk" onchange="readD();form()">${opt(Object.entries(KINDS).map(([k,v])=>[k,v.l]),D.kind)}</select>
+  <label>Person</label><input id="fp" list="pl" value="${esc(D.person)}" placeholder="Name"><datalist id="pl">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`
+  +acct("fs",KINDS[D.kind].in?"Money came into":"Money went out of",D.acct)+`<label>Note (optional)</label><input id="fn" value="${esc(D.note)}" placeholder="e.g. for medical, 2 months">`;
+ h+=`<label>Date</label><input id="fd" type="date" value="${D.date}">`;
+ if(t==="expense"||t==="income")h+=`<label class="chk"><input id="fr" type="checkbox" ${D.repeat?"checked":""} onchange="$('#fuw').style.display=this.checked?'':'none'"> Repeats every month</label><div id="fuw" style="${D.repeat?"":"display:none"}"><label>Last month it counts (optional)</label><input id="fu" type="month" value="${D.until||""}"></div>`;
+ h+=`<div class="acts">${D.id?`<button class="btn del" onclick="delTx()">Delete</button>`:`<button class="btn sec" onclick="closeSheet()">Cancel</button>`}<button class="btn" onclick="saveTx()">Save</button></div>`;
+ sheet(D.id?"Edit entry":"New entry",h);
+}
+function saveTx(){
+ readD();const amt=parseFloat(String(D.amount).replace(/,/g,""))||0,t=D.type;
+ if(amt<=0)return $("#fa").focus();
+ if(t==="people"&&!D.person.trim())return $("#fp").focus();
+ if(t==="transfer"&&D.acct===D.to)return alert("Pick two different accounts.");
+ const o={id:D.id||uid(),type:t,amount:amt,date:D.date||ymd(new Date()),acct:D.acct,note:(D.note||"").trim()};
+ if(t==="expense")o.cat=D.cat;if(t==="transfer")o.to=D.to;if(t==="people"){o.kind=D.kind;o.person=D.person.trim()}
+ if(t==="expense"||t==="income"){o.repeat=!!D.repeat;o.until=D.repeat?D.until:""}
+ const i=S.txs.findIndex(x=>x.id===o.id);i>=0?S.txs[i]=o:S.txs.push(o);
+ if(!o.repeat&&(tab==="o"||tab==="a"))M=o.date.slice(0,7);
+ save();closeSheet();render()}
+function delTx(){S.txs=S.txs.filter(x=>x.id!==D.id);save();closeSheet();render()}
+
+function editAcct(id){
+ const a=S.accounts.find(x=>x.id===id)||{name:"",open:""};
+ sheet(id?"Edit account":"New account",`<label>Name</label><input id="an" value="${esc(a.name)}" placeholder="HDFC, BOB, Karnataka Bank, Cash…">
+ <label>${id?"Opening balance (before the entries you added)":"Balance right now"}</label><input id="ab" inputmode="decimal" value="${a.open}" placeholder="0">
+ <div class="acts">${id?`<button class="btn del" onclick="delAcct('${id}')">Delete</button>`:`<button class="btn sec" onclick="closeSheet()">Cancel</button>`}<button class="btn" onclick="saveAcct('${id||""}')">Save</button></div>`)}
+function saveAcct(id){
+ const n=$("#an").value.trim();if(!n)return $("#an").focus();
+ const o={id:id||uid(),name:n,open:parseFloat($("#ab").value.replace(/,/g,""))||0};
+ const i=S.accounts.findIndex(x=>x.id===o.id);i>=0?S.accounts[i]=o:S.accounts.push(o);save();closeSheet();render()}
+function delAcct(id){
+ if(S.accounts.length<2)return alert("Keep at least one account.");
+ if(S.txs.some(t=>t.acct===id||t.to===id))return alert("This account has entries. Delete or edit those first.");
+ S.accounts=S.accounts.filter(a=>a.id!==id);save();closeSheet();render()}
+
+function exportData(){
+ const b=new Blob([JSON.stringify(S,null,1)],{type:"application/json"}),a=document.createElement("a");
+ a.href=URL.createObjectURL(b);a.download="where-it-goes-backup-"+ymd(new Date())+".json";document.body.appendChild(a);a.click();a.remove()}
+function importData(inp){
+ const f=inp.files[0];if(!f)return;const r=new FileReader();
+ r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.accounts)||!Array.isArray(d.txs)||!d.accounts.length)throw 0;
+  if(confirm("Replace everything on this device with this backup?")){S=Object.assign(def(),d);save();tab="o";render()}}
+  catch(e){alert("That file isn’t a valid backup from this version.")}inp.value=""};
+ r.readAsText(f)}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+try{const c=document.createElement("canvas");c.width=c.height=180;const x=c.getContext("2d");x.fillStyle="#17252A";x.fillRect(0,0,180,180);
+ [["#D9822B",24,60],["#3F6C8F",84,40],["#0B7A63",124,30]].forEach(([col,l,w])=>{x.fillStyle=col;x.fillRect(l,60,w,70)});
+ const l=document.createElement("link");l.rel="apple-touch-icon";l.href=c.toDataURL("image/png");document.head.appendChild(l)}catch(e){}
+render();
+</script>
+</body>
+</html>
