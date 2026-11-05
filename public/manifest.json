@@ -1,0 +1,8 @@
+{
+  "short_name": "Where it goes",
+  "name": "Where it goes — Personal Finance Ledger",
+  "start_url": "/Expenses-App/",
+  "display": "standalone",
+  "background_color": "#17252A",
+  "theme_color": "#17252A"
+}
