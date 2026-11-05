@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { CATS, KINDS } from "../constants/config";
-import { ym, ymd, uid, safeMoney, calc, txTitle, sign, fmt } from "../utils/currency";
+import {
+  ym,
+  ymd,
+  uid,
+  safeMoney,
+  calc,
+  txTitle,
+  sign,
+  fmt,
+  getAcc,
+  safeAdd,
+  getPersonDebtInfo,
+  checkClearance,
+  getActiveDebtors
+} from "../utils/currency";
 
 export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateState, setModal }) {
   const [D, setD] = useState(null);
@@ -35,16 +49,36 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
     const p = calc(S).P[k];
     if (!p) return null;
     const hist = S.txs
-      .filter((t) => t.type === "people" && t.person.trim().toLowerCase() === k)
+      .filter((t) => t.type === "people" && t.person && t.person.trim().toLowerCase() === k)
       .sort((a, b) => b.date.localeCompare(a.date));
+
+    const isSettled = p.owe <= 0.005 && p.owed <= 0.005 && p.held <= 0.005;
+    const totalLent = hist.filter((t) => t.kind === "lend").reduce((acc, t) => safeAdd(acc, t.amount), 0);
+    const totalCollected = hist.filter((t) => t.kind === "collect").reduce((acc, t) => safeAdd(acc, t.amount), 0);
 
     return (
       <div id="scrim" className="on" onClick={(e) => e.target.id === "scrim" && closeSheet()}>
         <div id="sheet">
-          <h3>{p.name}</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <h3 style={{ margin: 0 }}>{p.name}</h3>
+            {isSettled && (
+              <span style={{ fontSize: "12px", background: "rgba(11,122,99,0.12)", color: "var(--in)", padding: "4px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                ✓ Settled & Cleared
+              </span>
+            )}
+          </div>
           <div>
             {p.owe > 0.005 && <div className="out">You owe {fmt(p.owe, S.cur)}</div>}
-            {p.owed > 0.005 && <div className="in">Owes you {fmt(p.owed, S.cur)}</div>}
+            {p.owed > 0.005 && (
+              <div className="in">
+                Owes you {fmt(p.owed, S.cur)}
+                {totalCollected > 0 && (
+                  <small style={{ display: "block", color: "#D9822B", fontWeight: 500, marginTop: "2px" }}>
+                    Partially cleared ({fmt(totalCollected, S.cur)} paid back of {fmt(totalLent, S.cur)})
+                  </small>
+                )}
+              </div>
+            )}
             {p.held > 0.005 && <div>You are keeping {fmt(p.held, S.cur)} for them</div>}
           </div>
           <div className="acts" style={{ flexWrap: "wrap" }}>
@@ -70,7 +104,10 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
           <h2 style={{ marginTop: "20px" }}>History</h2>
           {hist.map((t) => (
             <button key={t.id} className="row" onClick={() => setModal({ mode: "tx", id: t.id })}>
-              <span className="t"><div>{txTitle(t)}</div><small>{t.date}</small></span>
+              <span className="t">
+                <div>{txTitle(t)}</div>
+                <small>{t.date} · {getAcc(S.accounts, t.acct).name}</small>
+              </span>
               <span className={`a ${sign(t) > 0 ? "in" : "out"}`}>{sign(t) > 0 ? "+" : "−"}{fmt(t.amount, S.cur)}</span>
             </button>
           ))}
@@ -120,7 +157,64 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
   }
 
   if (!D) return null;
-  const names = [...new Set(S.txs.filter((x) => x.type === "people").map((x) => x.person.trim()))];
+  const names = [...new Set(S.txs.filter((x) => x.type === "people" && x.person).map((x) => x.person.trim()))];
+
+  const activeDebtors = D.type === "people" ? getActiveDebtors(S, D.kind, D.id) : [];
+  const debtInfo = D.type === "people" && D.person ? getPersonDebtInfo(S, D.person, D.id) : null;
+  const targetDebt = debtInfo
+    ? D.kind === "collect"
+      ? debtInfo.owed
+      : D.kind === "repay"
+      ? debtInfo.owe
+      : D.kind === "hand"
+      ? debtInfo.held
+      : 0
+    : 0;
+
+  let clearanceFeedback = null;
+  if (D.type === "people" && D.person && D.amount) {
+    if (targetDebt > 0 && (D.kind === "collect" || D.kind === "repay" || D.kind === "hand")) {
+      const clr = checkClearance(targetDebt, D.amount);
+      if (clr.type === "cleared") {
+        clearanceFeedback = {
+          icon: "✓",
+          text: D.kind === "collect"
+            ? `Fully clears ${debtInfo.name}'s debt`
+            : D.kind === "repay"
+            ? `Fully clears your debt to ${debtInfo.name}`
+            : `Fully returns kept money to ${debtInfo.name}`,
+          bg: "rgba(11, 122, 99, 0.12)",
+          color: "var(--in)",
+          border: "rgba(11, 122, 99, 0.25)"
+        };
+      } else if (clr.type === "partial") {
+        clearanceFeedback = {
+          icon: "⚠️",
+          text: `Partially cleared — ${fmt(clr.remaining, S.cur)} still remaining`,
+          bg: "rgba(217, 130, 43, 0.12)",
+          color: "#D9822B",
+          border: "rgba(217, 130, 43, 0.25)"
+        };
+      } else if (clr.type === "overpaid") {
+        clearanceFeedback = {
+          icon: "ℹ️",
+          text: `Overpayment of ${fmt(clr.overpaid, S.cur)}`,
+          bg: "rgba(200, 69, 31, 0.12)",
+          color: "var(--out)",
+          border: "rgba(200, 69, 31, 0.25)"
+        };
+      }
+    } else if (D.kind === "lend" && debtInfo && debtInfo.owed > 0) {
+      const newTotal = safeAdd(debtInfo.owed, D.amount);
+      clearanceFeedback = {
+        icon: "ℹ️",
+        text: `${debtInfo.name} already owes ${fmt(debtInfo.owed, S.cur)}. New total: ${fmt(newTotal, S.cur)}`,
+        bg: "rgba(63, 108, 143, 0.12)",
+        color: "#3F6C8F",
+        border: "rgba(63, 108, 143, 0.25)"
+      };
+    }
+  }
 
   const saveTx = () => {
     const amt = safeMoney(D.amount);
@@ -179,8 +273,12 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
           ))}
         </div>
 
-        <label>Amount</label>
-        <input inputMode="decimal" value={D.amount} onChange={(e) => setD({ ...D, amount: e.target.value })} placeholder="0" />
+        {D.type !== "people" && (
+          <>
+            <label>Amount</label>
+            <input inputMode="decimal" value={D.amount} onChange={(e) => setD({ ...D, amount: e.target.value })} placeholder="0" />
+          </>
+        )}
 
         {D.type === "expense" && (
           <>
@@ -246,13 +344,92 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
                 <option key={k} value={k}>{v.l}</option>
               ))}
             </select>
-            <label>Person</label>
+
+            {activeDebtors.length > 0 && (D.kind === "collect" || D.kind === "repay" || D.kind === "hand") && (
+              <>
+                <label>
+                  {D.kind === "collect"
+                    ? "Select person who owes you"
+                    : D.kind === "repay"
+                    ? "Select person you owe"
+                    : "Select person holding money for"}
+                </label>
+                <select
+                  value={activeDebtors.some((d) => d.name.toLowerCase() === (D.person || "").trim().toLowerCase()) ? (activeDebtors.find((d) => d.name.toLowerCase() === (D.person || "").trim().toLowerCase())?.name || "") : ""}
+                  onChange={(e) => {
+                    const selName = e.target.value;
+                    if (selName) {
+                      setD((prev) => ({ ...prev, person: selName }));
+                    }
+                  }}
+                >
+                  <option value="">
+                    -- Choose active contact ({activeDebtors.length}) --
+                  </option>
+                  {activeDebtors.map((d) => (
+                    <option key={d.key} value={d.name}>
+                      {d.name} ({D.kind === "collect" ? "Owes " : D.kind === "repay" ? "You owe " : "Holding "}{fmt(d.amount, S.cur)})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            <label>Person {activeDebtors.length > 0 && (D.kind === "collect" || D.kind === "repay" || D.kind === "hand") ? "(or enter name)" : ""}</label>
             <input list="pl" value={D.person} onChange={(e) => setD({ ...D, person: e.target.value })} placeholder="Name" />
             <datalist id="pl">
               {names.map((n) => (
                 <option key={n} value={n} />
               ))}
             </datalist>
+
+            {debtInfo && targetDebt > 0 && (D.kind === "collect" || D.kind === "repay" || D.kind === "hand") && (
+              <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--card)", padding: "8px 12px", borderRadius: "10px", border: "1.5px solid var(--line)" }}>
+                <span style={{ fontSize: "13px" }}>
+                  {D.kind === "collect" ? "Currently owes: " : D.kind === "repay" ? "You owe: " : "Holding: "}
+                  <b>{fmt(targetDebt, S.cur)}</b>
+                </span>
+                <button
+                  type="button"
+                  className="btn sec"
+                  style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "14px" }}
+                  onClick={() => setD((prev) => ({ ...prev, amount: targetDebt.toString() }))}
+                >
+                  Pay full {fmt(targetDebt, S.cur)}
+                </button>
+              </div>
+            )}
+
+            <label>Amount</label>
+            <input inputMode="decimal" value={D.amount} onChange={(e) => setD({ ...D, amount: e.target.value })} placeholder="0" />
+
+            {clearanceFeedback && (
+              <div style={{
+                marginTop: "6px",
+                padding: "8px 12px",
+                borderRadius: "10px",
+                fontSize: "13px",
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "8px",
+                background: clearanceFeedback.bg,
+                color: clearanceFeedback.color,
+                border: `1px solid ${clearanceFeedback.border}`
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>{clearanceFeedback.icon}</span>
+                  <span>{clearanceFeedback.text}</span>
+                </div>
+                <span style={{ fontSize: "11.5px", fontWeight: 500, opacity: 0.9 }}>
+                  {KINDS[D.kind]?.in ? "Deposits into: " : "Paid from: "}
+                  <b>{getAcc(S.accounts, D.acct).name}</b>
+                </span>
+              </div>
+            )}
+
             <label>{KINDS[D.kind]?.in ? "Money came into" : "Money went out of"}</label>
             <select value={D.acct} onChange={(e) => setD({ ...D, acct: e.target.value })}>
               {S.accounts.map((a) => (

@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ym, mname, shift } from "./utils/currency";
-import { loadState, saveState, startRealtimeSync } from "./services/storageService";
+import {
+  loadState,
+  saveState,
+  startRealtimeSync,
+  getStoredUser,
+  logoutUser
+} from "./services/storageService";
 import { HomeView, ActivityView, AccountsView, PeopleView, MoreView } from "./components/Views";
 import SheetModal from "./components/SheetModal";
+import AuthView from "./components/AuthView";
 
 const TABS = [
   { k: "o", l: "Home", svg: <path d="M4 11l8-7 8 7v9H4z" /> },
@@ -13,19 +20,31 @@ const TABS = [
 ];
 
 export default function App() {
-  const [S, setS] = useState(() => loadState());
+  const [user, setUser] = useState(() => getStoredUser());
+  const [isGuest, setIsGuest] = useState(false);
+
+  const [S, setS] = useState(() => {
+    const session = getStoredUser();
+    return loadState(session ? session.key : null);
+  });
+
   const [M, setM] = useState(() => ym(new Date()));
   const [tab, setTab] = useState("o");
   const [filter, setFilter] = useState({ ft: "", fAcct: "", fcat: "" });
   const [modal, setModal] = useState(null);
-  const [syncStatus, setSyncStatus] = useState({ connected: false, message: "Connecting to cloud..." });
+  const [syncStatus, setSyncStatus] = useState({ connected: false, message: "Connecting..." });
 
   const connectRealtime = useCallback(() => {
+    if (!user) {
+      setSyncStatus({ connected: false, message: isGuest ? "Offline Guest Mode" : "Local mode" });
+      return () => {};
+    }
     return startRealtimeSync(
+      user.key,
       (remoteState) => setS(remoteState),
       (status) => setSyncStatus(status)
     );
-  }, []);
+  }, [user, isGuest]);
 
   useEffect(() => {
     const stopSync = connectRealtime();
@@ -56,13 +75,36 @@ export default function App() {
 
   const updateState = async (next) => {
     setS(next);
-    await saveState(next);
+    await saveState(next, user ? user.key : null);
+  };
+
+  const handleLoginSuccess = (session) => {
+    setUser(session);
+    setIsGuest(false);
+    const loaded = loadState(session.key);
+    setS(loaded);
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setUser(null);
+    setIsGuest(false);
+    setS(loadState(null));
   };
 
   const handleAddNew = () => {
     if (tab === "c") setModal({ mode: "acct", id: "" });
     else setModal({ mode: "tx", id: "", pre: tab === "p" ? { type: "people" } : {} });
   };
+
+  if (!user && !isGuest) {
+    return (
+      <AuthView
+        onLoginSuccess={handleLoginSuccess}
+        onGuest={() => setIsGuest(true)}
+      />
+    );
+  }
 
   return (
     <>
@@ -73,7 +115,9 @@ export default function App() {
             <div style={{ textAlign: "center" }}>
               <b>{mname(M)}</b>
               {syncStatus.connected && (
-                <div style={{ fontSize: "11px", color: "var(--in)", fontWeight: 500 }}>● Live Cloud Sync</div>
+                <div style={{ fontSize: "11px", color: "var(--in)", fontWeight: 500 }}>
+                  ● Cloud Sync: {user ? user.username : "Guest"}
+                </div>
               )}
             </div>
             <button onClick={() => setM(shift(M, 1))} aria-label="Next month">›</button>
@@ -110,6 +154,9 @@ export default function App() {
             updateState={updateState}
             setTab={setTab}
             syncStatus={syncStatus}
+            user={user}
+            onLogout={handleLogout}
+            onShowAuth={() => setIsGuest(false)}
           />
         )}
       </main>

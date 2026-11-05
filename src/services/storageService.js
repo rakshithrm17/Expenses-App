@@ -1,11 +1,10 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
 import { KEY, defState } from "../constants/config";
 
-// Hardcoded default Firebase configuration so end-users never have to configure anything!
 const DEFAULT_API_KEY = "AIzaSyDHtHRf3T_PaiFEkHyfm8Fr3tuhVvNNRRQ";
 const DEFAULT_PROJECT_ID = "expenses-app-e41a3";
-const DEFAULT_SYNC_ID = "rakshith-master-ledger-v2";
+const AUTH_STORAGE_KEY = "where-it-goes-auth-session";
 
 let dbInstance = null;
 let unsubscribeSnapshot = null;
@@ -20,49 +19,167 @@ function getActiveConfig() {
   };
 }
 
-export function startRealtimeSync(onRemoteData, onStatusChange) {
+function getFirestoreDB() {
+  if (!dbInstance) {
+    const existingApps = getApps();
+    const app = existingApps.length ? existingApps[0] : initializeApp(getActiveConfig());
+    dbInstance = getFirestore(app);
+  }
+  return dbInstance;
+}
+
+export function getUserStorageKey(userKey) {
+  return userKey ? `${KEY}_${userKey}` : KEY;
+}
+
+export function getStoredUser() {
+  try {
+    const r = localStorage.getItem(AUTH_STORAGE_KEY);
+    return r ? JSON.parse(r) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function setStoredUser(userObj) {
+  if (userObj) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userObj));
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+export async function loginWithUsername(username, password) {
+  const cleanUser = (username || "").trim();
+  const userKey = cleanUser.toLowerCase();
+
+  if (!cleanUser || !password) {
+    throw new Error("Please enter both username and password.");
+  }
+
+  const db = getFirestoreDB();
+  const userDocRef = doc(db, "users", userKey);
+  const snap = await getDoc(userDocRef);
+
+  if (!snap.exists()) {
+    throw new Error(`Username "${cleanUser}" does not exist. Tap "Create new account" to register.`);
+  }
+
+  const userData = snap.data();
+  if (userData.password !== password) {
+    throw new Error("Incorrect password. Please try again.");
+  }
+
+  const session = {
+    username: userData.username || cleanUser,
+    key: userKey
+  };
+
+  setStoredUser(session);
+  return session;
+}
+
+export async function registerWithUsername(username, password) {
+  const cleanUser = (username || "").trim();
+  const userKey = cleanUser.toLowerCase();
+
+  if (!cleanUser) {
+    throw new Error("Please choose a username.");
+  }
+  if (cleanUser.length < 3) {
+    throw new Error("Username must be at least 3 characters.");
+  }
+  if (!password || password.length < 3) {
+    throw new Error("Password must be at least 3 characters.");
+  }
+
+  const db = getFirestoreDB();
+  const userDocRef = doc(db, "users", userKey);
+  const snap = await getDoc(userDocRef);
+
+  if (snap.exists()) {
+    throw new Error(`Username "${cleanUser}" is already taken. Please choose another.`);
+  }
+
+  const newUserRecord = {
+    username: cleanUser,
+    password: password,
+    createdAt: Date.now()
+  };
+
+  await setDoc(userDocRef, newUserRecord);
+
+  // If local browser already has legacy data (e.g. for main admin), migrate it into their new user ledger
+  const storageKey = getUserStorageKey(userKey);
+  try {
+    const legacy = JSON.parse(localStorage.getItem(KEY));
+    if (legacy && Array.isArray(legacy.accounts) && Array.isArray(legacy.txs) && legacy.txs.length > 0) {
+      localStorage.setItem(storageKey, JSON.stringify(legacy));
+      const ledgerDocRef = doc(db, "ledgers", userKey);
+      await setDoc(ledgerDocRef, legacy, { merge: true });
+    }
+  } catch (e) {}
+
+  const session = {
+    username: cleanUser,
+    key: userKey
+  };
+
+  setStoredUser(session);
+  return session;
+}
+
+export function logoutUser() {
+  if (unsubscribeSnapshot) {
+    unsubscribeSnapshot();
+    unsubscribeSnapshot = null;
+  }
+  setStoredUser(null);
+}
+
+export function startRealtimeSync(userKey, onRemoteData, onStatusChange) {
   if (unsubscribeSnapshot) {
     unsubscribeSnapshot();
     unsubscribeSnapshot = null;
   }
 
-  const cfg = getActiveConfig();
-  if (!cfg.apiKey || !cfg.projectId) {
-    onStatusChange({ connected: false, message: "Offline-only (Local browser)" });
+  if (!userKey) {
+    onStatusChange({ connected: false, message: "Offline / Local Mode" });
     return () => {};
   }
 
   try {
-    const existingApps = getApps();
-    const app = existingApps.length ? existingApps[0] : initializeApp(cfg);
-    dbInstance = getFirestore(app);
+    const db = getFirestoreDB();
+    onStatusChange({ connected: false, message: "Connecting to user ledger..." });
 
-    onStatusChange({ connected: false, message: "Connecting to live cloud..." });
+    // Each user's data is stored in its own dedicated document: ledgers/{userKey}
+    const docRef = doc(db, "ledgers", userKey);
+    const storageKey = getUserStorageKey(userKey);
 
-    const docRef = doc(dbInstance, "ledgers", DEFAULT_SYNC_ID);
     unsubscribeSnapshot = onSnapshot(
       docRef,
       (snapshot) => {
-        onStatusChange({ connected: true, message: "Live Cloud Sync Active" });
+        onStatusChange({ connected: true, message: "Secure Cloud Sync Active" });
         if (snapshot.exists()) {
           const cloudData = snapshot.data();
           if (cloudData && Array.isArray(cloudData.accounts) && Array.isArray(cloudData.txs)) {
-            const local = loadState();
+            const local = loadState(userKey);
             if ((cloudData.updatedAt || 0) > (local.updatedAt || 0) || local.txs.length === 0) {
               const merged = Object.assign(defState(), cloudData);
-              localStorage.setItem(KEY, JSON.stringify(merged));
+              localStorage.setItem(storageKey, JSON.stringify(merged));
               onRemoteData(merged);
             }
           }
         } else {
-          const local = loadState();
+          // If no cloud ledger exists yet for this user, seed it from their local state
+          const local = loadState(userKey);
           if (local.txs.length > 0 || local.accounts.length > 1) {
-            saveState(local);
+            saveState(local, userKey);
           }
         }
       },
       (err) => {
-        console.error("Firebase Sync Error:", err);
+        console.error("Firestore Sync Error:", err);
         onStatusChange({ connected: false, error: true, message: "Cloud sync error (using local)" });
       }
     );
@@ -76,14 +193,28 @@ export function startRealtimeSync(onRemoteData, onStatusChange) {
   }
 }
 
-export function loadState() {
+export function loadState(userKey = null) {
+  const storageKey = getUserStorageKey(userKey);
   try {
-    const r = JSON.parse(localStorage.getItem(KEY));
+    const r = JSON.parse(localStorage.getItem(storageKey));
     if (r && Array.isArray(r.accounts) && Array.isArray(r.txs)) {
       return Object.assign(defState(), r);
     }
   } catch (e) {}
 
+  // If this user has no local record yet, check if there's unauthenticated legacy data to migrate
+  if (userKey) {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(KEY));
+      if (legacy && Array.isArray(legacy.accounts) && Array.isArray(legacy.txs) && legacy.txs.length > 0) {
+        const migrated = Object.assign(defState(), legacy);
+        localStorage.setItem(storageKey, JSON.stringify(migrated));
+        return migrated;
+      }
+    } catch (e) {}
+  }
+
+  // Fallback migration from ancient v1 format if present
   const s = defState();
   try {
     const o = JSON.parse(localStorage.getItem("where-it-goes-v1"));
@@ -106,18 +237,21 @@ export function loadState() {
   return s;
 }
 
-export async function saveState(state) {
+export async function saveState(state, userKey = null) {
   const stamped = { ...state, updatedAt: Date.now() };
+  const storageKey = getUserStorageKey(userKey);
+
   try {
-    localStorage.setItem(KEY, JSON.stringify(stamped));
+    localStorage.setItem(storageKey, JSON.stringify(stamped));
   } catch (e) {}
 
-  if (dbInstance) {
+  if (userKey) {
     try {
-      const docRef = doc(dbInstance, "ledgers", DEFAULT_SYNC_ID);
+      const db = getFirestoreDB();
+      const docRef = doc(db, "ledgers", userKey);
       await setDoc(docRef, stamped, { merge: true });
     } catch (e) {
-      console.error("Failed to push to cloud:", e);
+      console.error("Failed to push to user cloud ledger:", e);
     }
   }
   return stamped;

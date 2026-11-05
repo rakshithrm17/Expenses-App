@@ -1,4 +1,4 @@
-import { KINDS, getCat } from "../constants/config";
+import { KINDS, getCat } from "../constants/config.js";
 
 // Strict integer Paise math to guarantee zero floating-point errors
 export const toPaise = (v) => {
@@ -153,4 +153,74 @@ export function stats(S, m) {
   }
   o.left = safeSub(safeSub(o.tin, o.spent), o.saved);
   return o;
+}
+
+export function getPersonDebtInfo(S, personName, editingTxId = null) {
+  if (!personName || !personName.trim()) return null;
+  const k = personName.trim().toLowerCase();
+  const c = calc(S);
+  const p = c.P[k];
+
+  let baseOwed = p ? p.owed : 0;
+  let baseOwe = p ? p.owe : 0;
+  let baseHeld = p ? p.held : 0;
+
+  if (editingTxId) {
+    const tx = S.txs.find((x) => x.id === editingTxId);
+    if (tx && tx.type === "people" && tx.person && tx.person.trim().toLowerCase() === k) {
+      const amt = safeMoney(tx.amount);
+      if (tx.kind === "collect") baseOwed = safeAdd(baseOwed, amt);
+      if (tx.kind === "repay") baseOwe = safeAdd(baseOwe, amt);
+      if (tx.kind === "hand") baseHeld = safeAdd(baseHeld, amt);
+      if (tx.kind === "lend") baseOwed = safeSub(baseOwed, amt);
+      if (tx.kind === "borrow") baseOwe = safeSub(baseOwe, amt);
+      if (tx.kind === "hold") baseHeld = safeSub(baseHeld, amt);
+    }
+  }
+
+  return {
+    name: p ? p.name : personName.trim(),
+    owed: Math.max(0, baseOwed),
+    owe: Math.max(0, baseOwe),
+    held: Math.max(0, baseHeld)
+  };
+}
+
+export function checkClearance(baseAmt, enteredAmt) {
+  const baseP = toPaise(baseAmt);
+  const entP = toPaise(enteredAmt);
+  if (entP <= 0) {
+    return { type: "none", remaining: baseAmt };
+  }
+  const remP = baseP - entP;
+  if (remP === 0) {
+    return { type: "cleared", remaining: 0 };
+  }
+  if (remP > 0) {
+    return { type: "partial", remaining: fromPaise(remP) };
+  }
+  return { type: "overpaid", overpaid: fromPaise(-remP), remaining: 0 };
+}
+
+export function getActiveDebtors(S, kind, editingTxId = null) {
+  const c = calc(S);
+  const list = [];
+  const editingTx = editingTxId ? S.txs.find((x) => x.id === editingTxId) : null;
+  const editPersonKey = editingTx?.person?.trim().toLowerCase();
+
+  for (const [k, p] of Object.entries(c.P)) {
+    let val = 0;
+    if (kind === "collect") val = p.owed;
+    else if (kind === "repay") val = p.owe;
+    else if (kind === "hand") val = p.held;
+
+    if (editingTx && editPersonKey === k && editingTx.kind === kind) {
+      val = safeAdd(val, safeMoney(editingTx.amount));
+    }
+
+    if (val > 0.005) {
+      list.push({ key: k, name: p.name, amount: val });
+    }
+  }
+  return list.sort((a, b) => b.amount - a.amount);
 }

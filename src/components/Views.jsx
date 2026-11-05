@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { getCat, defState } from "../constants/config";
 import { calc, stats, sumv, fmt, safeSub, getAcc, dayOf, mi, txTitle, txSub, sign, ymd } from "../utils/currency";
 
@@ -237,9 +237,11 @@ export function AccountsView({ S, setTab, onEditAcct }) {
 }
 
 export function PeopleView({ S, onOpenPerson, onOpenTx }) {
+  const [showSettled, setShowSettled] = useState(false);
   const c = calc(S);
   const L = Object.entries(c.P);
   const open = L.filter(([, p]) => [p.owe, p.owed, p.held].some((x) => Math.abs(x) > 0.005));
+  const settled = L.filter(([, p]) => [p.owe, p.owed, p.held].every((x) => Math.abs(x) <= 0.005));
 
   if (!L.length) {
     return (
@@ -268,12 +270,45 @@ export function PeopleView({ S, onOpenPerson, onOpenTx }) {
       ) : (
         <p className="note">Everyone is settled.</p>
       )}
-      {L.length > open.length && <p className="note">{L.length - open.length} settled</p>}
+
+      {settled.length > 0 && (
+        <div style={{ marginTop: "18px" }}>
+          <button
+            type="button"
+            className="btn sec"
+            style={{
+              width: "100%",
+              padding: "9px 12px",
+              fontSize: "13.5px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}
+            onClick={() => setShowSettled(!showSettled)}
+          >
+            <span>Settled / Cleared ({settled.length})</span>
+            <span style={{ fontSize: "12px", color: "var(--mute)" }}>{showSettled ? "▲ Hide" : "▼ View"}</span>
+          </button>
+          {showSettled && (
+            <div style={{ marginTop: "8px" }}>
+              {settled.map(([k, p]) => (
+                <button key={k} className="row" onClick={() => onOpenPerson(k)} style={{ opacity: 0.85 }}>
+                  <span className="t">
+                    <div>{p.name}</div>
+                    <small style={{ color: "var(--in)", fontWeight: 500 }}>✓ All cleared</small>
+                  </span>
+                  <span className="a" style={{ color: "var(--mute)", fontSize: "13px" }}>Settled ›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
 
-export function MoreView({ S, updateState, setTab, syncStatus }) {
+export function MoreView({ S, updateState, setTab, syncStatus, user, onLogout, onShowAuth }) {
   const inpRef = useRef(null);
 
   const exportData = () => {
@@ -318,13 +353,56 @@ export function MoreView({ S, updateState, setTab, syncStatus }) {
   return (
     <>
       <section style={{ paddingTop: "18px" }}>
+        <h2>Account & Security</h2>
+        {user ? (
+          <div className="card-box" style={{ marginTop: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--mute)" }}>Logged in as</div>
+                <div style={{ fontWeight: 650, fontSize: "15px", marginTop: "2px" }}>
+                  {user.username}
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--in)", marginTop: "4px", fontWeight: 500 }}>
+                  ● Private Cloud Ledger: ledgers/{user.key}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn sec"
+                onClick={onLogout}
+                style={{ padding: "6px 12px", fontSize: "13px", borderRadius: "10px" }}
+              >
+                Log out
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="card-box" style={{ marginTop: "8px" }}>
+            <div style={{ fontSize: "13.5px", color: "var(--mute)", marginBottom: "10px" }}>
+              You are using <b>Guest Mode</b> (Offline on this device only).
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={onShowAuth}
+              style={{ width: "100%", padding: "10px" }}
+            >
+              Sign in to enable Private Cloud Sync
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section>
         <h2>Cloud Sync Status</h2>
         <div className="sync-badge">
           <span className={`sync-dot ${syncStatus.connected ? "live" : syncStatus.error ? "err" : ""}`} />
           <span>{syncStatus.message}</span>
         </div>
         <p className="note">
-          Cloud sync is fully automated and pre-configured out of the box. Any entries you add on your phone or laptop sync instantly.
+          {user
+            ? "Your data is strictly encrypted and synced exclusively to your private account."
+            : "Sign in to back up and sync your ledger across your phone, tablet, and laptop."}
         </p>
       </section>
 
