@@ -5,6 +5,13 @@ import { KEY, defState } from "../constants/config";
 const DEFAULT_API_KEY = "AIzaSyDHtHRf3T_PaiFEkHyfm8Fr3tuhVvNNRRQ";
 const DEFAULT_PROJECT_ID = "expenses-app-e41a3";
 const AUTH_STORAGE_KEY = "where-it-goes-auth-session";
+const LOCAL_USERS_KEY = "where-it-goes-local-users";
+
+// Default preconfigured master account
+const DEFAULT_MASTER_USER = {
+  username: "rakshith",
+  password: "123"
+};
 
 let dbInstance = null;
 let unsubscribeSnapshot = null;
@@ -26,6 +33,41 @@ function getFirestoreDB() {
     dbInstance = getFirestore(app);
   }
   return dbInstance;
+}
+
+export function getLocalUsers() {
+  try {
+    const raw = localStorage.getItem(LOCAL_USERS_KEY);
+    const users = raw ? JSON.parse(raw) : {};
+    if (!users["rakshith"]) {
+      users["rakshith"] = {
+        username: DEFAULT_MASTER_USER.username,
+        password: DEFAULT_MASTER_USER.password,
+        createdAt: 1700000000000
+      };
+    }
+    return users;
+  } catch (e) {
+    return {
+      rakshith: {
+        username: DEFAULT_MASTER_USER.username,
+        password: DEFAULT_MASTER_USER.password,
+        createdAt: 1700000000000
+      }
+    };
+  }
+}
+
+export function saveLocalUser(cleanUser, password) {
+  try {
+    const users = getLocalUsers();
+    users[cleanUser.toLowerCase()] = {
+      username: cleanUser,
+      password: password,
+      createdAt: Date.now()
+    };
+    localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+  } catch (e) {}
 }
 
 export function getUserStorageKey(userKey) {
@@ -57,21 +99,54 @@ export async function loginWithUsername(username, password) {
     throw new Error("Please enter both username and password.");
   }
 
-  const db = getFirestoreDB();
-  const userDocRef = doc(db, "users", userKey);
-  const snap = await getDoc(userDocRef);
+  // 1. Instant check for master account rakshith / 123
+  if (userKey === "rakshith" && password === DEFAULT_MASTER_USER.password) {
+    const session = {
+      username: "rakshith",
+      key: "rakshith"
+    };
+    setStoredUser(session);
+    saveLocalUser("rakshith", "123");
 
-  if (!snap.exists()) {
-    throw new Error(`Username "${cleanUser}" does not exist. Tap "Create new account" to register.`);
+    // Attempt background Firestore registration/sync if permissions allow
+    try {
+      const db = getFirestoreDB();
+      const userDocRef = doc(db, "users", "rakshith");
+      setDoc(userDocRef, { username: "rakshith", password: "123", lastLogin: Date.now() }, { merge: true }).catch(() => {});
+    } catch (e) {}
+
+    return session;
   }
 
-  const userData = snap.data();
-  if (userData.password !== password) {
+  // 2. Check local users registry
+  const localUsers = getLocalUsers();
+  const localRecord = localUsers[userKey];
+
+  // 3. Try checking Firestore
+  let cloudRecord = null;
+  try {
+    const db = getFirestoreDB();
+    const userDocRef = doc(db, "users", userKey);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      cloudRecord = snap.data();
+    }
+  } catch (err) {
+    console.warn("Firestore lookup unavailable, falling back to local auth:", err?.message);
+  }
+
+  const userRecord = cloudRecord || localRecord;
+
+  if (!userRecord) {
+    throw new Error(`Username "${cleanUser}" does not exist. Tap "Create new account" to register or use default (rakshith / 123).`);
+  }
+
+  if (userRecord.password !== password) {
     throw new Error("Incorrect password. Please try again.");
   }
 
   const session = {
-    username: userData.username || cleanUser,
+    username: userRecord.username || cleanUser,
     key: userKey
   };
 
@@ -93,12 +168,31 @@ export async function registerWithUsername(username, password) {
     throw new Error("Password must be at least 3 characters.");
   }
 
-  const db = getFirestoreDB();
-  const userDocRef = doc(db, "users", userKey);
-  const snap = await getDoc(userDocRef);
+  // If user is registering rakshith with 123, allow it directly
+  if (userKey === "rakshith" && password === "123") {
+    return loginWithUsername("rakshith", "123");
+  }
 
-  if (snap.exists()) {
+  // Check if taken locally
+  const localUsers = getLocalUsers();
+  if (localUsers[userKey] && userKey !== "rakshith") {
+    // If it exists locally and password matches, just log them in
+    if (localUsers[userKey].password === password) {
+      return loginWithUsername(username, password);
+    }
     throw new Error(`Username "${cleanUser}" is already taken. Please choose another.`);
+  }
+
+  // Try checking cloud Firestore (if permissions allow)
+  try {
+    const db = getFirestoreDB();
+    const userDocRef = doc(db, "users", userKey);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      throw new Error(`Username "${cleanUser}" is already taken. Please choose another.`);
+    }
+  } catch (err) {
+    console.warn("Firestore registration check skipped (using local):", err?.message);
   }
 
   const newUserRecord = {
@@ -107,16 +201,29 @@ export async function registerWithUsername(username, password) {
     createdAt: Date.now()
   };
 
-  await setDoc(userDocRef, newUserRecord);
+  // Always save locally so registration NEVER fails due to cloud permissions
+  saveLocalUser(cleanUser, password);
 
-  // If local browser already has legacy data (e.g. for main admin), migrate it into their new user ledger
+  // Attempt cloud sync in background
+  try {
+    const db = getFirestoreDB();
+    const userDocRef = doc(db, "users", userKey);
+    await setDoc(userDocRef, newUserRecord);
+  } catch (err) {
+    console.warn("Could not sync user registration to Firestore (using local):", err?.message);
+  }
+
+  // If local browser already has legacy data, migrate it into their new user ledger
   const storageKey = getUserStorageKey(userKey);
   try {
     const legacy = JSON.parse(localStorage.getItem(KEY));
     if (legacy && Array.isArray(legacy.accounts) && Array.isArray(legacy.txs) && legacy.txs.length > 0) {
       localStorage.setItem(storageKey, JSON.stringify(legacy));
-      const ledgerDocRef = doc(db, "ledgers", userKey);
-      await setDoc(ledgerDocRef, legacy, { merge: true });
+      try {
+        const db = getFirestoreDB();
+        const ledgerDocRef = doc(db, "ledgers", userKey);
+        await setDoc(ledgerDocRef, legacy, { merge: true });
+      } catch (e) {}
     }
   } catch (e) {}
 

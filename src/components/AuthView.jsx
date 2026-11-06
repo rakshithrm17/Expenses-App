@@ -111,7 +111,7 @@ export default function AuthView({ onLoginSuccess, onGuest }) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
+            placeholder={isSignUp ? "Create a password (e.g. 123)" : "e.g. 123"}
             required
             style={{ marginBottom: "20px" }}
           />
@@ -125,6 +125,18 @@ export default function AuthView({ onLoginSuccess, onGuest }) {
             {loading ? "Checking..." : isSignUp ? "Create account" : "Sign in"}
           </button>
         </form>
+
+        <div style={{
+          textAlign: "center",
+          marginTop: "14px",
+          padding: "8px 10px",
+          background: "var(--bg)",
+          borderRadius: "8px",
+          fontSize: "12.5px",
+          color: "var(--mute)"
+        }}>
+          Default master login: <b>rakshith</b> &bull; password: <b>123</b>
+        </div>
 
         <div style={{ textAlign: "center", marginTop: "18px" }}>
           <button
