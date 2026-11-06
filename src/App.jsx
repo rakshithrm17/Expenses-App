@@ -138,7 +138,7 @@ export default function App() {
           <AccountsView
             S={S}
             setTab={setTab}
-            onEditAcct={(id) => setModal({ mode: "acct", id })}
+            onViewSource={(id) => setModal({ mode: "source", id })}
           />
         )}
         {tab === "p" && (

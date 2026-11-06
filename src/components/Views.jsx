@@ -1,43 +1,77 @@
 import React, { useRef, useState } from "react";
 import { getCat, defState } from "../constants/config";
-import { calc, stats, sumv, fmt, safeSub, getAcc, dayOf, mi, txTitle, txSub, sign, ymd } from "../utils/currency";
+import { calc, stats, sumv, fmt, safeAdd, safeSub, getAcc, dayOf, mi, txTitle, txSub, sign, ymd } from "../utils/currency";
 
 export function RightNowSection({ S, setTab }) {
   const c = calc(S);
   const tot = sumv(c.bal);
-  const h = sumv(c.held);
-  const P = Object.values(c.P);
-  const owe = P.reduce((s, p) => s + Math.max(p.owe, 0), 0);
-  const owed = P.reduce((s, p) => s + Math.max(p.owed, 0), 0);
+  const totHeld = sumv(c.held);
+  const totLent = sumv(c.lent);
+  const totOwe = sumv(c.owe);
+  const netUser = safeSub(safeAdd(tot, totLent), safeAdd(totHeld, totOwe));
+  const globShortage = totHeld > tot ? safeSub(totHeld, Math.max(0, tot)) : 0;
 
   return (
     <section>
       <h2>Your money right now</h2>
       <button className="row" onClick={() => setTab("c")}>
-        <span className="t">In all accounts</span>
+        <span className="t">Cash in all accounts</span>
         <span className="a">{fmt(tot, S.cur)}</span>
       </button>
-      {h > 0.005 && (
-        <div className="row">
-          <span className="t">Kept for others<br /><small>Not yours to spend</small></span>
-          <span className="a out">− {fmt(h, S.cur)}</span>
-        </div>
+
+      {totHeld > 0.005 && (
+        <button className="row" onClick={() => setTab("p")}>
+          <span className="t" style={{ color: "var(--out)" }}>
+            <b>Someone’s money kept with you</b><br />
+            <small style={{ color: "var(--out)" }}>Not yours to spend</small>
+          </span>
+          <span className="a out">− {fmt(totHeld, S.cur)}</span>
+        </button>
       )}
-      <div className="row">
-        <span className="t"><b>Yours to use</b></span>
-        <span className="a in">{fmt(safeSub(tot, h), S.cur)}</span>
+
+      {totLent > 0.005 && (
+        <button className="row" onClick={() => setTab("p")}>
+          <span className="t" style={{ color: "var(--in)" }}>
+            <b>Money you lent</b><br />
+            <small>Has to come back</small>
+          </span>
+          <span className="a in">+ {fmt(totLent, S.cur)}</span>
+        </button>
+      )}
+
+      {totOwe > 0.005 && (
+        <button className="row" onClick={() => setTab("p")}>
+          <span className="t" style={{ color: "var(--out)" }}>
+            <b>You owe others (Borrowed)</b>
+          </span>
+          <span className="a out">− {fmt(totOwe, S.cur)}</span>
+        </button>
+      )}
+
+      <div className="row" style={{ borderTop: "1.5px solid var(--line)", paddingTop: "10px" }}>
+        <span className="t">
+          <b>Your actual own money</b><br />
+          <small>Cash + Lent − Kept for others</small>
+        </span>
+        <span className={`a ${netUser >= 0 ? "in" : "out"}`} style={{ fontSize: "18px" }}>
+          <b>{fmt(netUser, S.cur)}</b>
+        </span>
       </div>
-      {owe > 0.005 && (
-        <button className="row" onClick={() => setTab("p")}>
-          <span className="t">You owe others</span>
-          <span className="a out">{fmt(owe, S.cur)}</span>
-        </button>
-      )}
-      {owed > 0.005 && (
-        <button className="row" onClick={() => setTab("p")}>
-          <span className="t">Others owe you</span>
-          <span className="a in">{fmt(owed, S.cur)}</span>
-        </button>
+
+      {globShortage > 0.005 && (
+        <div style={{
+          background: "rgba(200,69,31,0.08)",
+          border: "1.5px solid var(--out)",
+          borderRadius: "10px",
+          padding: "10px 13px",
+          marginTop: "12px",
+          fontSize: "13px",
+          color: "var(--ink)",
+          lineHeight: 1.4
+        }}>
+          <b style={{ color: "var(--out)" }}>⚠️ Total cash shortage: {fmt(globShortage, S.cur)}</b><br />
+          Total cash is <b>{fmt(tot, S.cur)}</b>, but you are keeping <b>{fmt(totHeld, S.cur)}</b> for others. Still short by <b>{fmt(globShortage, S.cur)}</b> to give everyone back right now.
+        </div>
       )}
     </section>
   );
@@ -193,14 +227,16 @@ export function ActivityView({ S, M, filter, setFilter, onOpenTx }) {
             </div>
             {g[d].map((t) => {
               const s = sign(t);
+              const cls = t.skipAcct ? "" : s > 0 ? "in" : s < 0 ? "out" : "";
+              const pfx = t.skipAcct ? "" : s > 0 ? "+" : s < 0 ? "−" : "";
               return (
                 <button key={t.id} className="row" onClick={() => onOpenTx(t.id)}>
                   <span className="t">
                     <div>{txTitle(t)}</div>
                     <small>{txSub(t, S.accounts)}</small>
                   </span>
-                  <span className={`a ${s > 0 ? "in" : s < 0 ? "out" : ""}`}>
-                    {s > 0 ? "+" : s < 0 ? "−" : ""}{fmt(t.amount, S.cur)}
+                  <span className={`a ${cls}`}>
+                    {pfx}{fmt(t.amount, S.cur)}
                   </span>
                 </button>
               );
@@ -212,24 +248,62 @@ export function ActivityView({ S, M, filter, setFilter, onOpenTx }) {
   );
 }
 
-export function AccountsView({ S, setTab, onEditAcct }) {
+export function AccountsView({ S, setTab, onViewSource }) {
   const c = calc(S);
   return (
     <>
       <RightNowSection S={S} setTab={setTab} />
       <section>
-        <h2>Accounts</h2>
-        {S.accounts.map((a) => (
-          <button key={a.id} className="row" onClick={() => onEditAcct(a.id)}>
-            <span className="t">
-              <div>{a.name}</div>
-              {c.held[a.id] > 0.005 && <small>Includes {fmt(c.held[a.id], S.cur)} kept for others</small>}
+        <h2>Accounts (Sources)</h2>
+        {S.accounts.map((a) => {
+          const b = c.bal[a.id] || 0;
+          const h = c.held[a.id] || 0;
+          const l = c.lent[a.id] || 0;
+          const o = c.owe[a.id] || 0;
+          const myMoney = safeSub(safeAdd(b, l), safeAdd(h, o));
+
+          const subParts = [];
+          if (h > 0.005) {
+            subParts.push(<span key="h" style={{ color: "var(--out)" }}>Kept: −{fmt(h, S.cur)}</span>);
+          }
+          if (l > 0.005) {
+            subParts.push(<span key="l" style={{ color: "var(--in)" }}>Lent: +{fmt(l, S.cur)}</span>);
+          }
+          if (h > b) {
+            subParts.push(
+              <span key="shortage" style={{ color: "var(--out)", fontWeight: 600 }}>
+                Shortage: −{fmt(safeSub(h, b), S.cur)}
+              </span>
+            );
+          }
+          subParts.push(
+            <span key="my">
+              Your money: <b>{fmt(myMoney, S.cur)}</b>
             </span>
-            <span className={`a ${c.bal[a.id] < 0 ? "out" : ""}`}>{fmt(c.bal[a.id], S.cur)}</span>
-          </button>
-        ))}
+          );
+
+          return (
+            <button key={a.id} className="row" onClick={() => onViewSource(a.id)}>
+              <span className="t">
+                <div><b>{a.name}</b></div>
+                <small>
+                  {subParts.map((part, idx) => (
+                    <React.Fragment key={idx}>
+                      {idx > 0 && " · "}
+                      {part}
+                    </React.Fragment>
+                  ))}
+                </small>
+              </span>
+              <span className={`a ${b < 0 ? "out" : ""}`}>
+                {fmt(b, S.cur)}
+                <small>balance</small>
+              </span>
+            </button>
+          );
+        })}
         <p className="note" style={{ marginTop: "12px" }}>
-          Add every place you keep money: cash, each bank, wallets. Tap one to rename or fix its balance.
+          Tap any source to see its complete clarity breakdown (your money vs someone’s money vs shortage).
         </p>
       </section>
     </>

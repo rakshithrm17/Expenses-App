@@ -63,6 +63,7 @@ export function occTo(t, m) {
 export const dayOf = (t, m) => Math.min(+t.date.slice(8, 10), mi(m).n);
 
 export function eff(t) {
+  if (t.skipAcct) return [];
   const amt = safeMoney(t.amount);
   if (t.type === "income") return [[t.acct, amt]];
   if (t.type === "expense") return [[t.acct, -amt]];
@@ -71,7 +72,9 @@ export function eff(t) {
 }
 
 export function sign(t) {
-  return t.type === "transfer" ? 0 : eff(t)[0][1] > 0 ? 1 : -1;
+  if (t.skipAcct || t.type === "transfer") return 0;
+  const effects = eff(t);
+  return effects.length && effects[0][1] > 0 ? 1 : -1;
 }
 
 export function txTitle(t) {
@@ -90,17 +93,21 @@ export function txTitle(t) {
 }
 
 export function txSub(t, accounts) {
-  if (t.type === "income") return getAcc(accounts, t.acct).name + (t.repeat ? " · monthly" : "");
-  if (t.type === "expense") return getCat(t.cat).n + " · " + getAcc(accounts, t.acct).name + (t.repeat ? " · monthly" : "");
+  const tag = t.skipAcct ? " · past record" : "";
+  if (t.type === "income") return getAcc(accounts, t.acct).name + tag + (t.repeat ? " · monthly" : "");
+  if (t.type === "expense") return getCat(t.cat).n + " · " + getAcc(accounts, t.acct).name + tag + (t.repeat ? " · monthly" : "");
   if (t.type === "transfer") return getAcc(accounts, t.acct).name + " → " + getAcc(accounts, t.to).name;
-  return getAcc(accounts, t.acct).name + (t.note ? " · " + t.note : "");
+  return getAcc(accounts, t.acct).name + tag + (t.note ? " · " + t.note : "");
 }
 
 export function calc(S) {
-  const now = ym(new Date()), bal = {}, held = {}, P = {};
+  const now = ym(new Date());
+  const bal = {}, held = {}, lent = {}, owe = {}, P = {};
   S.accounts.forEach((a) => {
     bal[a.id] = safeMoney(a.open);
     held[a.id] = 0;
+    lent[a.id] = 0;
+    owe[a.id] = 0;
   });
 
   for (const t of S.txs) {
@@ -113,10 +120,22 @@ export function calc(S) {
       const k = t.person.trim().toLowerCase();
       const v = safeMul(t.amount, n);
       const p = (P[k] = P[k] || { name: t.person.trim(), owe: 0, owed: 0, held: 0 });
-      if (t.kind === "borrow") p.owe = safeAdd(p.owe, v);
-      if (t.kind === "repay") p.owe = safeSub(p.owe, v);
-      if (t.kind === "lend") p.owed = safeAdd(p.owed, v);
-      if (t.kind === "collect") p.owed = safeSub(p.owed, v);
+      if (t.kind === "borrow") {
+        p.owe = safeAdd(p.owe, v);
+        if (t.acct in owe) owe[t.acct] = safeAdd(owe[t.acct], v);
+      }
+      if (t.kind === "repay") {
+        p.owe = safeSub(p.owe, v);
+        if (t.acct in owe) owe[t.acct] = safeSub(owe[t.acct], v);
+      }
+      if (t.kind === "lend") {
+        p.owed = safeAdd(p.owed, v);
+        if (t.acct in lent) lent[t.acct] = safeAdd(lent[t.acct], v);
+      }
+      if (t.kind === "collect") {
+        p.owed = safeSub(p.owed, v);
+        if (t.acct in lent) lent[t.acct] = safeSub(lent[t.acct], v);
+      }
       if (t.kind === "hold") {
         p.held = safeAdd(p.held, v);
         if (t.acct in held) held[t.acct] = safeAdd(held[t.acct], v);
@@ -127,7 +146,7 @@ export function calc(S) {
       }
     }
   }
-  return { bal, held, P };
+  return { bal, held, lent, owe, P };
 }
 
 export function stats(S, m) {

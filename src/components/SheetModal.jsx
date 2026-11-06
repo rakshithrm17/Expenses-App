@@ -11,6 +11,10 @@ import {
   fmt,
   getAcc,
   safeAdd,
+  safeSub,
+  safeMul,
+  occTo,
+  eff,
   getPersonDebtInfo,
   checkClearance,
   getActiveDebtors
@@ -38,11 +42,160 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
       );
     } else if (modal.mode === "acct") {
       const a = S.accounts.find((x) => x.id === modal.id) || { name: "", open: "" };
-      setAcctForm({ id: modal.id || "", name: a.name, open: a.open });
+      const c = calc(S);
+      const curVal = modal.id && modal.id in c.bal ? c.bal[modal.id] : a.open;
+      setAcctForm({ id: modal.id || "", name: a.name, open: curVal });
     }
   }, [modal, S, M]);
 
   if (!modal) return <div id="scrim" />;
+
+  if (modal.mode === "source") {
+    const id = modal.id;
+    const a = S.accounts.find((x) => x.id === id) || { name: "" };
+    const c = calc(S);
+    const b = c.bal[id] || 0;
+    const h = c.held[id] || 0;
+    const l = c.lent[id] || 0;
+    const o = c.owe[id] || 0;
+    const myMoney = safeSub(safeAdd(b, l), safeAdd(h, o));
+
+    const heldMap = {};
+    const lentMap = {};
+    for (const t of S.txs) {
+      if (t.type === "people" && t.acct === id && t.person) {
+        const k = t.person.trim();
+        const amt = safeMoney(t.amount);
+        if (t.kind === "hold") heldMap[k] = safeAdd(heldMap[k] || 0, amt);
+        if (t.kind === "hand") heldMap[k] = safeSub(heldMap[k] || 0, amt);
+        if (t.kind === "lend") lentMap[k] = safeAdd(lentMap[k] || 0, amt);
+        if (t.kind === "collect") lentMap[k] = safeSub(lentMap[k] || 0, amt);
+      }
+    }
+
+    const heldList = Object.entries(heldMap)
+      .filter(([, v]) => v > 0.005)
+      .map(([person, amount]) => ({ person, amount }));
+    const lentList = Object.entries(lentMap)
+      .filter(([, v]) => v > 0.005)
+      .map(([person, amount]) => ({ person, amount }));
+
+    const heldPeopleStr = heldList.map((x) => `${x.person} (${fmt(x.amount, S.cur)})`).join(", ");
+    const lentPeopleStr = lentList.map((x) => `${x.person} (${fmt(x.amount, S.cur)})`).join(", ");
+
+    let shortageBlock = null;
+    if (h > 0.005) {
+      if (b >= h) {
+        shortageBlock = (
+          <div style={{
+            background: "rgba(11,122,99,0.08)",
+            border: "1px solid var(--in)",
+            borderRadius: "10px",
+            padding: "11px 13px",
+            marginTop: "12px",
+            fontSize: "13.5px",
+            color: "var(--in)",
+            lineHeight: 1.4
+          }}>
+            <b>✓ No cash shortage</b><br />
+            Your cash balance ({fmt(b, S.cur)}) fully covers all {fmt(h, S.cur)} kept for others.
+          </div>
+        );
+      } else {
+        const totalShortage = safeSub(h, Math.max(0, b));
+        let remCash = Math.max(0, b);
+        const parts = [];
+        for (const item of heldList) {
+          const covered = Math.min(remCash, item.amount);
+          const shortage = safeSub(item.amount, covered);
+          remCash = safeSub(remCash, covered);
+          if (shortage > 0.005) {
+            parts.push(`${item.person} (short by ${fmt(shortage, S.cur)})`);
+          }
+        }
+        shortageBlock = (
+          <div style={{
+            background: "rgba(200,69,31,0.08)",
+            border: "1.5px solid var(--out)",
+            borderRadius: "10px",
+            padding: "12px 14px",
+            marginTop: "12px",
+            fontSize: "13.5px",
+            color: "var(--out)"
+          }}>
+            <div style={{ fontSize: "15px", fontWeight: 700, marginBottom: "4px" }}>
+              ⚠️ Cash shortage: {fmt(totalShortage, S.cur)}
+            </div>
+            <div style={{ color: "var(--ink)", lineHeight: 1.4 }}>
+              Balance is <b>{fmt(b, S.cur)}</b>. Still you need <b>{fmt(totalShortage, S.cur)}</b> to give back: {parts.join(", ")}.
+            </div>
+            {l > 0.005 && (
+              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "var(--ink)", opacity: 0.9 }}>
+                Once {fmt(l, S.cur)} lent to {lentList.map((x) => x.person).join(", ")} is collected, your shortage will be cleared with {fmt(myMoney, S.cur)} left for you.
+              </div>
+            )}
+          </div>
+        );
+      }
+    }
+
+    return (
+      <div id="scrim" className="on" onClick={(e) => e.target.id === "scrim" && closeSheet()}>
+        <div id="sheet">
+          <h3>{a.name} Breakdown</h3>
+          <div style={{ background: "var(--bg)", borderRadius: "12px", padding: "14px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+              <span>Cash balance in account:</span>
+              <b>{fmt(b, S.cur)}</b>
+            </div>
+            {h > 0.005 && (
+              <div style={{ display: "flex", justifyContent: "space-between", color: "var(--out)", marginBottom: "8px" }}>
+                <span>
+                  Someone’s money kept (RED):<br />
+                  <small>{heldPeopleStr || "Kept for others"}</small>
+                </span>
+                <b>− {fmt(h, S.cur)}</b>
+              </div>
+            )}
+            {l > 0.005 && (
+              <div style={{ display: "flex", justifyContent: "space-between", color: "var(--in)", marginBottom: "8px" }}>
+                <span>
+                  Money you lent (to come back):<br />
+                  <small>{lentPeopleStr || "Pending loans"}</small>
+                </span>
+                <b>+ {fmt(l, S.cur)}</b>
+              </div>
+            )}
+            {o > 0.005 && (
+              <div style={{ display: "flex", justifyContent: "space-between", color: "var(--out)", marginBottom: "8px" }}>
+                <span>You owe from here:</span>
+                <b>− {fmt(o, S.cur)}</b>
+              </div>
+            )}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              borderTop: "1.5px solid var(--line)",
+              paddingTop: "10px",
+              fontSize: "17px"
+            }}>
+              <span><b>Your actual money here:</b></span>
+              <b className={myMoney >= 0 ? "in" : "out"}>{fmt(myMoney, S.cur)}</b>
+            </div>
+            {shortageBlock}
+          </div>
+          <div className="acts">
+            <button className="btn" onClick={() => setModal({ mode: "acct", id })}>
+              Edit / Calibrate balance
+            </button>
+            <button className="btn sec" onClick={closeSheet}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (modal.mode === "person") {
     const k = modal.personKey;
@@ -121,7 +274,21 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
     const saveAcct = () => {
       const n = acctForm.name.trim();
       if (!n) return;
-      const o = { id: acctForm.id || uid(), name: n, open: safeMoney(acctForm.open) };
+      const targetBal = safeMoney(acctForm.open);
+      let openVal = targetBal;
+      if (acctForm.id) {
+        const now = ym(new Date());
+        let txSum = 0;
+        for (const t of S.txs) {
+          const n = occTo(t, now);
+          if (!n) continue;
+          for (const [a, d] of eff(t)) {
+            if (a === acctForm.id) txSum = safeAdd(txSum, safeMul(d, n));
+          }
+        }
+        openVal = safeSub(targetBal, txSum);
+      }
+      const o = { id: acctForm.id || uid(), name: n, open: openVal };
       const next = [...S.accounts];
       const idx = next.findIndex((x) => x.id === o.id);
       if (idx >= 0) next[idx] = o;
@@ -145,8 +312,9 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
           <h3>{acctForm.id ? "Edit account" : "New account"}</h3>
           <label>Name</label>
           <input value={acctForm.name} onChange={(e) => setAcctForm({ ...acctForm, name: e.target.value })} placeholder="HDFC, BOB, Karnataka Bank, Cash…" />
-          <label>{acctForm.id ? "Opening balance (before the entries you added)" : "Balance right now"}</label>
+          <label>Balance right now (in your bank/cash today)</label>
           <input inputMode="decimal" value={acctForm.open} onChange={(e) => setAcctForm({ ...acctForm, open: e.target.value })} placeholder="0" />
+          <p className="note">Enter what is actually in this account today. It automatically calibrates your balance to match reality.</p>
           <div className="acts">
             {acctForm.id ? <button className="btn del" onClick={delAcct}>Delete</button> : <button className="btn sec" onClick={closeSheet}>Cancel</button>}
             <button className="btn" onClick={saveAcct}>Save</button>
@@ -228,7 +396,8 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
       amount: amt,
       date: D.date || ymd(new Date()),
       acct: D.acct,
-      note: (D.note || "").trim()
+      note: (D.note || "").trim(),
+      skipAcct: !!D.skipAcct
     };
     if (D.type === "expense") o.cat = D.cat;
     if (D.type === "transfer") o.to = D.to;
@@ -314,6 +483,28 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
+            <label><b>Income type</b></label>
+            <div className="seg" style={{ marginTop: "6px", marginBottom: "6px" }}>
+              <button
+                type="button"
+                className={!D.skipAcct ? "on" : ""}
+                onClick={() => setD({ ...D, skipAcct: false })}
+              >
+                + New incoming money
+              </button>
+              <button
+                type="button"
+                className={D.skipAcct ? "on" : ""}
+                onClick={() => setD({ ...D, skipAcct: true })}
+              >
+                Old record (keep balance)
+              </button>
+            </div>
+            <p className="note" style={{ margin: "2px 0 10px" }}>
+              {D.skipAcct
+                ? "Keeps account balance as is. Just logs this income in stats."
+                : "Adds this amount (+) to your account balance."}
+            </p>
           </>
         )}
 
@@ -436,6 +627,30 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
+            <label><b>Transaction type</b></label>
+            <div className="seg" style={{ marginTop: "6px", marginBottom: "6px" }}>
+              <button
+                type="button"
+                className={!D.skipAcct ? "on" : ""}
+                onClick={() => setD({ ...D, skipAcct: false })}
+              >
+                {KINDS[D.kind]?.in ? "+ New incoming (adds)" : "− Live payment (deducts)"}
+              </button>
+              <button
+                type="button"
+                className={D.skipAcct ? "on" : ""}
+                onClick={() => setD({ ...D, skipAcct: true })}
+              >
+                Old record (keep balance)
+              </button>
+            </div>
+            <p className="note" style={{ margin: "2px 0 10px" }}>
+              {D.skipAcct
+                ? "Keeps current account balance as is. Just saves the record to track who owes what."
+                : KINDS[D.kind]?.in
+                ? "Adds this amount (+) to your account balance."
+                : "Deducts this amount (−) from your account balance."}
+            </p>
             <label>Note (optional)</label>
             <input value={D.note} onChange={(e) => setD({ ...D, note: e.target.value })} placeholder="e.g. for medical, 2 months" />
           </>

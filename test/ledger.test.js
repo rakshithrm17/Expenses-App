@@ -486,5 +486,62 @@ describe("Multi-Account Lent & Repaid Lifecycle (Cash + 2 Banks)", () => {
     assert.equal(c.P["amit"].owed, 0, "Amit is fully cleared");
     assert.equal(c.P["sara"].owed, 0, "Sara is fully cleared");
   });
+
+  test("Scenario 8: Source clarity breakdown, skipAcct, shortage math, and account calibration", () => {
+    const S = {
+      cur: "INR",
+      accounts: [
+        { id: "cash", name: "Cash", open: 5000 },
+        { id: "hdfc", name: "HDFC", open: 10000 }
+      ],
+      txs: [
+        // Keeping 8,000 for Rahul in Cash (but Cash only has 5,000 opening balance)
+        { id: "t1", type: "people", kind: "hold", amount: 8000, person: "Rahul", acct: "cash", date: "2026-11-01" },
+        // Lent 4,000 to Suresh from Cash
+        { id: "t2", type: "people", kind: "lend", amount: 4000, person: "Suresh", acct: "cash", date: "2026-11-02" },
+        // Past record: Old record income 50,000 (skipAcct = true, should NOT modify HDFC balance)
+        { id: "t3", type: "income", amount: 50000, acct: "hdfc", note: "Bonus", date: "2026-11-02", skipAcct: true }
+      ]
+    };
+
+    const c = calc(S);
+    // Cash balance: 5,000 + 8,000 (kept) - 4,000 (lent) = 9,000
+    assert.equal(c.bal["cash"], 9000);
+    // HDFC balance: 10,000 (t3 had skipAcct: true, so it remained 10,000)
+    assert.equal(c.bal["hdfc"], 10000);
+
+    // Kept in cash: 8,000
+    assert.equal(c.held["cash"], 8000);
+    // Lent from cash: 4,000
+    assert.equal(c.lent["cash"], 4000);
+
+    // My own money in cash: 9,000 (bal) + 4,000 (lent) - 8,000 (held) - 0 (owe) = 5,000
+    const myMoneyCash = c.bal["cash"] + c.lent["cash"] - c.held["cash"] - c.owe["cash"];
+    assert.equal(myMoneyCash, 5000);
+
+    // Total accounts: 9,000 + 10,000 = 19,000
+    const tot = c.bal["cash"] + c.bal["hdfc"];
+    assert.equal(tot, 19000);
+
+    // Net user actual own money across all accounts:
+    // tot (19,000) + totLent (4,000) - totHeld (8,000) - totOwe (0) = 15,000
+    const netUser = tot + (c.lent["cash"] + c.lent["hdfc"]) - (c.held["cash"] + c.held["hdfc"]) - (c.owe["cash"] + c.owe["hdfc"]);
+    assert.equal(netUser, 15000);
+
+    // Account Balance Auto-Calibration Test:
+    // User sees Cash balance is 9,000, but real cash in wallet is 7,500.
+    // User inputs targetBal = 7,500.
+    // txSum in cash is +8,000 (hold) - 4,000 (lend) = +4,000.
+    // calibrated openVal = targetBal - txSum = 7,500 - 4,000 = 3,500.
+    const targetBal = 7500;
+    const txSum = 8000 - 4000;
+    const openVal = targetBal - txSum;
+    assert.equal(openVal, 3500);
+
+    // Verify new balance equals targetBal with calibrated openVal:
+    S.accounts[0].open = openVal;
+    const c2 = calc(S);
+    assert.equal(c2.bal["cash"], 7500, "Calibrating open balance correctly matches target reality");
+  });
 });
 
