@@ -108,6 +108,60 @@ export default function App() {
 
   return (
     <>
+      <header style={{
+        maxWidth: "540px",
+        margin: "0 auto",
+        padding: "12px 16px 2px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{
+            width: "28px",
+            height: "28px",
+            borderRadius: "8px",
+            background: "linear-gradient(135deg, #0F172A 0%, #059669 100%)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            fontSize: "14px"
+          }}>
+            W
+          </div>
+          <span style={{ fontWeight: 800, fontSize: "16px", letterSpacing: "-0.02em", color: "var(--ink)" }}>
+            Where It Goes
+          </span>
+        </div>
+
+        {user && (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "var(--mute)",
+            background: "var(--card)",
+            border: "1px solid var(--line)",
+            padding: "4px 10px",
+            borderRadius: "16px",
+            boxShadow: "var(--shadow-xs)"
+          }}>
+            <span style={{
+              width: "7px",
+              height: "7px",
+              borderRadius: "50%",
+              background: syncStatus.connected ? "var(--in)" : "var(--mute)",
+              boxShadow: syncStatus.connected ? "0 0 6px var(--in)" : "none"
+            }} />
+            <span>{user.username}</span>
+          </div>
+        )}
+      </header>
+
       <main id="view">
         {(tab === "o" || tab === "a") && (
           <div className="mnav">
@@ -115,7 +169,7 @@ export default function App() {
             <div style={{ textAlign: "center" }}>
               <b>{mname(M)}</b>
               {syncStatus.connected && (
-                <div style={{ fontSize: "11px", color: "var(--in)", fontWeight: 500 }}>
+                <div style={{ fontSize: "11px", color: "var(--in)", fontWeight: 500, marginTop: "1px" }}>
                   ● Cloud Sync: {user ? user.username : "Guest"}
                 </div>
               )}
@@ -164,7 +218,11 @@ export default function App() {
 
       {tab !== "m" && (
         <button className="pill" id="add" onClick={handleAddNew}>
-          {tab === "c" ? "Add account" : "Add entry"}
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <span>{tab === "c" ? "Add account" : "Add entry"}</span>
         </button>
       )}
 
