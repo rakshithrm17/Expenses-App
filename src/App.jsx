@@ -139,6 +139,7 @@ export default function App() {
             S={S}
             setTab={setTab}
             onViewSource={(id) => setModal({ mode: "source", id })}
+            onViewCard={(id) => setModal({ mode: "card", id })}
           />
         )}
         {tab === "p" && (

@@ -12,8 +12,10 @@ import {
   stats,
   getPersonDebtInfo,
   checkClearance,
-  getActiveDebtors
+  getActiveDebtors,
+  getCardDetails
 } from "../src/utils/currency.js";
+import { getTestSeedState } from "../src/services/storageService.js";
 
 describe("Strict Paise Financial Math", () => {
   test("Zero floating point precision errors", () => {
@@ -542,6 +544,118 @@ describe("Multi-Account Lent & Repaid Lifecycle (Cash + 2 Banks)", () => {
     S.accounts[0].open = openVal;
     const c2 = calc(S);
     assert.equal(c2.bal["cash"], 7500, "Calibrating open balance correctly matches target reality");
+  });
+
+  test("Scenario 9: Complete Credit Card Lifecycle (RuPay UPI, Visa, Bill Payment & Net Liquidity)", () => {
+    // 1. Verify Test Seed Topology
+    const seed = getTestSeedState();
+    const cSeed = calc(seed);
+
+    // Liquid bank cash accounts:
+    // ICICI Salary: 85,000 (open) + 85,000 (salary) - 30,000 (tr to SBI) - 20,000 (tr to HDFC) = 120,000
+    assert.equal(cSeed.bal["icici-sal"], 120000);
+
+    // SBI Daily: 0 (open) + 30,000 (from ICICI) - 650 (Swiggy) - 4,000 (RuPay partial bill pay) = 25,350
+    assert.equal(cSeed.bal["sbi-daily"], 25350);
+
+    // HDFC Savings: 15,000 (open) + 20,000 (from ICICI) + 15,000 (Rahul kept) - 8,000 (Suresh lent) = 42,000
+    assert.equal(cSeed.bal["hdfc-savings"], 42000);
+
+    // Cash in wallet: 3,500
+    assert.equal(cSeed.bal["cash"], 3500);
+
+    // Total liquid bank cash: 120,000 + 25,350 + 42,000 + 3,500 = 190,850
+    const bankAccounts = seed.accounts.filter((a) => a.type !== "card");
+    const totBank = bankAccounts.reduce((s, a) => safeAdd(s, cSeed.bal[a.id] || 0), 0);
+    assert.equal(totBank, 190850);
+
+    // 2. RuPay Card Card Details:
+    // Tata Neu RuPay: limit 150,000, statement billed 8,450.
+    // Spends: -8450 (groc) - 250 (coffee UPI) - 2200 (fuel UPI) = -10,900.
+    // Bill payment from SBI: +4000.
+    // Outstanding debt: 10,900 - 4,000 = 6,900.
+    const rupayCard = seed.accounts.find((a) => a.id === "rupay-card");
+    const rupayDetails = getCardDetails(rupayCard, seed, cSeed);
+
+    assert.equal(cSeed.bal["rupay-card"], -6900);
+    assert.equal(rupayDetails.debt, 6900);
+    assert.equal(rupayDetails.limit, 150000);
+    assert.equal(rupayDetails.available, 143100); // 150000 - 6900
+    assert.equal(rupayDetails.utilization, 5); // 6900 / 150000 = 4.6% -> round 5%
+    assert.equal(rupayDetails.initialBilled, 8450);
+    assert.equal(rupayDetails.totalPaid, 4000);
+    assert.equal(rupayDetails.remainingBilled, 4450); // 8450 - 4000
+    assert.equal(rupayDetails.unbilled, 2450); // 6900 (total debt) - 4450 (remaining billed) = 2450 (250 coffee + 2200 fuel)
+    assert.equal(rupayDetails.billDay, 12);
+    assert.equal(rupayDetails.dueDay, 2);
+
+    // 3. Visa Card Details:
+    // HDFC Millennia Visa: limit 200,000, statement billed 14,200.
+    // Spends: -14200 (Amazon) - 1800 (Bills) = -16,000.
+    // Payments: 0.
+    // Outstanding debt: 16,000.
+    const visaCard = seed.accounts.find((a) => a.id === "visa-card");
+    const visaDetails = getCardDetails(visaCard, seed, cSeed);
+
+    assert.equal(cSeed.bal["visa-card"], -16000);
+    assert.equal(visaDetails.debt, 16000);
+    assert.equal(visaDetails.limit, 200000);
+    assert.equal(visaDetails.available, 184000); // 200000 - 16000
+    assert.equal(visaDetails.utilization, 8); // 16000 / 200000 = 8%
+    assert.equal(visaDetails.remainingBilled, 14200);
+    assert.equal(visaDetails.unbilled, 1800); // 16000 - 14200
+
+    // 4. Total Card Debts across both cards:
+    const cardAccounts = seed.accounts.filter((a) => a.type === "card");
+    const totCardDebt = cardAccounts.reduce((s, a) => {
+      const b = cSeed.bal[a.id] || 0;
+      return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+    }, 0);
+    assert.equal(totCardDebt, 22900); // 6900 + 16000
+
+    // 5. Net User Worth & Clarity Check:
+    // Liquid Bank Cash (190,850) + Lent to Suresh (8,000) - Rahul Kept (15,000) - People Owe (0) - Card Dues (22,900)
+    // 190,850 + 8,000 - 15,000 - 22,900 = 160,950
+    const netUser = safeSub(
+      safeAdd(totBank, cSeed.lent["hdfc-savings"]),
+      safeAdd(safeAdd(cSeed.held["hdfc-savings"], 0), totCardDebt)
+    );
+    assert.equal(netUser, 160950);
+
+    // 6. Test 1-Tap Bill Payment Clearing Remaining Dues:
+    // User clears remaining ₹4,450 on RuPay Card via Transfer from SBI
+    seed.txs.push({
+      id: "clear-rupay-bill",
+      type: "transfer",
+      amount: 4450,
+      acct: "sbi-daily",
+      to: "rupay-card",
+      note: "Full statement clearance",
+      date: "2026-11-09"
+    });
+
+    const cAfterClear = calc(seed);
+    const rupayAfterClear = getCardDetails(rupayCard, seed, cAfterClear);
+    assert.equal(rupayAfterClear.remainingBilled, 0, "Billed statement must be fully 0 / cleared");
+    assert.equal(rupayAfterClear.debt, 2450, "Only unbilled recent spends remain");
+    assert.equal(rupayAfterClear.unbilled, 2450);
+    assert.equal(cAfterClear.bal["sbi-daily"], 20900); // 25350 - 4450
+
+    // 7. Fractional Paise Precision on Card:
+    seed.txs.push({
+      id: "fractional-rupay",
+      type: "expense",
+      amount: 49.99,
+      acct: "rupay-card",
+      cat: "food",
+      note: "Chai QR scan",
+      date: "2026-11-09"
+    });
+    const cFrac = calc(seed);
+    const rupayFrac = getCardDetails(rupayCard, seed, cFrac);
+    assert.equal(cFrac.bal["rupay-card"], -2499.99);
+    assert.equal(rupayFrac.debt, 2499.99);
+    assert.equal(rupayFrac.available, 147500.01);
   });
 });
 

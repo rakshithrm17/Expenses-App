@@ -1,17 +1,186 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
-import { KEY, defState } from "../constants/config";
+import { KEY, defState } from "../constants/config.js";
+import { ym } from "../utils/currency.js";
 
 const DEFAULT_API_KEY = "AIzaSyDHtHRf3T_PaiFEkHyfm8Fr3tuhVvNNRRQ";
 const DEFAULT_PROJECT_ID = "expenses-app-e41a3";
 const AUTH_STORAGE_KEY = "where-it-goes-auth-session";
 const LOCAL_USERS_KEY = "where-it-goes-local-users";
 
-// Default preconfigured master account
-const DEFAULT_MASTER_USER = {
-  username: "rakshith",
-  password: "123"
+// Default preconfigured master accounts
+const DEFAULT_MASTER_USERS = {
+  rakshith: { username: "rakshith", password: "123" },
+  test: { username: "test", password: "123" }
 };
+
+export function getTestSeedState() {
+  const currentMonth = ym(new Date());
+  return {
+    cur: "INR",
+    accounts: [
+      {
+        id: "icici-sal",
+        name: "ICICI Salary A/c",
+        type: "bank",
+        open: 85000
+      },
+      {
+        id: "sbi-daily",
+        name: "SBI Daily Use",
+        type: "bank",
+        open: 0
+      },
+      {
+        id: "hdfc-savings",
+        name: "HDFC Savings",
+        type: "bank",
+        open: 15000
+      },
+      {
+        id: "cash",
+        name: "Cash in Wallet",
+        type: "bank",
+        open: 3500
+      },
+      {
+        id: "rupay-card",
+        name: "Tata Neu RuPay Card",
+        type: "card",
+        cardType: "rupay",
+        limit: 150000,
+        billDay: 12,
+        dueDay: 2,
+        billedAmt: 8450,
+        open: 0
+      },
+      {
+        id: "visa-card",
+        name: "HDFC Millennia Visa",
+        type: "card",
+        cardType: "visa",
+        limit: 200000,
+        billDay: 20,
+        dueDay: 10,
+        billedAmt: 14200,
+        open: 0
+      }
+    ],
+    txs: [
+      {
+        id: "seed-sal",
+        type: "income",
+        amount: 85000,
+        acct: "icici-sal",
+        note: "Monthly Salary",
+        date: `${currentMonth}-01`,
+        repeat: true
+      },
+      {
+        id: "seed-tr-sbi",
+        type: "transfer",
+        amount: 30000,
+        acct: "icici-sal",
+        to: "sbi-daily",
+        note: "Monthly expense budget to SBI UPI",
+        date: `${currentMonth}-01`
+      },
+      {
+        id: "seed-tr-hdfc",
+        type: "transfer",
+        amount: 20000,
+        acct: "icici-sal",
+        to: "hdfc-savings",
+        note: "Savings transfer to HDFC",
+        date: `${currentMonth}-01`
+      },
+      {
+        id: "seed-hold-rahul",
+        type: "people",
+        kind: "hold",
+        amount: 15000,
+        person: "Rahul",
+        acct: "hdfc-savings",
+        note: "Rahul's savings kept with me",
+        date: `${currentMonth}-02`
+      },
+      {
+        id: "seed-lend-suresh",
+        type: "people",
+        kind: "lend",
+        amount: 8000,
+        person: "Suresh",
+        acct: "hdfc-savings",
+        note: "Emergency loan to Suresh",
+        date: `${currentMonth}-03`
+      },
+      {
+        id: "seed-rupay-1",
+        type: "expense",
+        amount: 8450,
+        acct: "rupay-card",
+        cat: "groc",
+        note: "D-Mart & Supermarket UPI via RuPay",
+        date: `${currentMonth}-04`
+      },
+      {
+        id: "seed-rupay-2",
+        type: "expense",
+        amount: 250,
+        acct: "rupay-card",
+        cat: "food",
+        note: "Coffee & snacks QR UPI",
+        date: `${currentMonth}-06`
+      },
+      {
+        id: "seed-rupay-3",
+        type: "expense",
+        amount: 2200,
+        acct: "rupay-card",
+        cat: "move",
+        note: "Petrol bunk QR UPI",
+        date: `${currentMonth}-07`
+      },
+      {
+        id: "seed-visa-1",
+        type: "expense",
+        amount: 14200,
+        acct: "visa-card",
+        cat: "shop",
+        note: "Amazon Great Indian Festival",
+        date: `${currentMonth}-03`
+      },
+      {
+        id: "seed-visa-2",
+        type: "expense",
+        amount: 1800,
+        acct: "visa-card",
+        cat: "bills",
+        note: "Electricity & Wifi recharge",
+        date: `${currentMonth}-05`
+      },
+      {
+        id: "seed-sbi-exp1",
+        type: "expense",
+        amount: 650,
+        acct: "sbi-daily",
+        cat: "food",
+        note: "Swiggy dinner",
+        date: `${currentMonth}-05`
+      },
+      {
+        id: "seed-pay-rupay",
+        type: "transfer",
+        amount: 4000,
+        acct: "sbi-daily",
+        to: "rupay-card",
+        note: "Partial RuPay card bill payment",
+        date: `${currentMonth}-08`
+      }
+    ],
+    updatedAt: Date.now()
+  };
+}
 
 let dbInstance = null;
 let unsubscribeSnapshot = null;
@@ -41,19 +210,23 @@ export function getLocalUsers() {
     const users = raw ? JSON.parse(raw) : {};
     if (!users["rakshith"]) {
       users["rakshith"] = {
-        username: DEFAULT_MASTER_USER.username,
-        password: DEFAULT_MASTER_USER.password,
+        username: "rakshith",
+        password: "123",
+        createdAt: 1700000000000
+      };
+    }
+    if (!users["test"]) {
+      users["test"] = {
+        username: "test",
+        password: "123",
         createdAt: 1700000000000
       };
     }
     return users;
   } catch (e) {
     return {
-      rakshith: {
-        username: DEFAULT_MASTER_USER.username,
-        password: DEFAULT_MASTER_USER.password,
-        createdAt: 1700000000000
-      }
+      rakshith: { username: "rakshith", password: "123", createdAt: 1700000000000 },
+      test: { username: "test", password: "123", createdAt: 1700000000000 }
     };
   }
 }
@@ -99,20 +272,20 @@ export async function loginWithUsername(username, password) {
     throw new Error("Please enter both username and password.");
   }
 
-  // 1. Instant check for master account rakshith / 123
-  if (userKey === "rakshith" && password === DEFAULT_MASTER_USER.password) {
+  // 1. Instant check for master accounts: rakshith / 123, test / 123
+  if ((userKey === "rakshith" || userKey === "test") && password === "123") {
     const session = {
-      username: "rakshith",
-      key: "rakshith"
+      username: userKey,
+      key: userKey
     };
     setStoredUser(session);
-    saveLocalUser("rakshith", "123");
+    saveLocalUser(userKey, "123");
 
     // Attempt background Firestore registration/sync if permissions allow
     try {
       const db = getFirestoreDB();
-      const userDocRef = doc(db, "users", "rakshith");
-      setDoc(userDocRef, { username: "rakshith", password: "123", lastLogin: Date.now() }, { merge: true }).catch(() => {});
+      const userDocRef = doc(db, "users", userKey);
+      setDoc(userDocRef, { username: userKey, password: "123", lastLogin: Date.now() }, { merge: true }).catch(() => {});
     } catch (e) {}
 
     return session;
@@ -308,6 +481,15 @@ export function loadState(userKey = null) {
       return Object.assign(defState(), r);
     }
   } catch (e) {}
+
+  // If test user has no data yet, seed with rich realistic topology
+  if (userKey === "test") {
+    const seed = getTestSeedState();
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(seed));
+    } catch (e) {}
+    return seed;
+  }
 
   // If this user has no local record yet, check if there's unauthenticated legacy data to migrate
   if (userKey) {

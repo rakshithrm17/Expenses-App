@@ -132,10 +132,14 @@ export default function AuthView({ onLoginSuccess, onGuest }) {
           padding: "8px 10px",
           background: "var(--bg)",
           borderRadius: "8px",
-          fontSize: "12.5px",
-          color: "var(--mute)"
+          fontSize: "12px",
+          color: "var(--mute)",
+          lineHeight: 1.5
         }}>
-          Default master login: <b>rakshith</b> &bull; password: <b>123</b>
+          <div>Master login: <b>rakshith</b> &bull; password: <b>123</b></div>
+          <div style={{ marginTop: "2px", color: "var(--in)", fontWeight: 500 }}>
+            ⚡ Demo credit cards & accounts: <b>test</b> &bull; password: <b>123</b>
+          </div>
         </div>
 
         <div style={{ textAlign: "center", marginTop: "18px" }}>

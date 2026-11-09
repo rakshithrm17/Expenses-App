@@ -1,23 +1,64 @@
 import React, { useRef, useState } from "react";
 import { getCat, defState } from "../constants/config";
-import { calc, stats, sumv, fmt, safeAdd, safeSub, getAcc, dayOf, mi, txTitle, txSub, sign, ymd } from "../utils/currency";
+import {
+  calc,
+  stats,
+  sumv,
+  fmt,
+  safeAdd,
+  safeSub,
+  getAcc,
+  dayOf,
+  mi,
+  txTitle,
+  txSub,
+  sign,
+  ymd,
+  getCardDetails
+} from "../utils/currency";
 
 export function RightNowSection({ S, setTab }) {
   const c = calc(S);
-  const tot = sumv(c.bal);
+  const bankAccounts = S.accounts.filter((a) => a.type !== "card");
+  const cardAccounts = S.accounts.filter((a) => a.type === "card");
+
+  const totBank = bankAccounts.reduce((s, a) => safeAdd(s, c.bal[a.id] || 0), 0);
+  const totCardDebt = cardAccounts.reduce((s, a) => {
+    const b = c.bal[a.id] || 0;
+    return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+  }, 0);
+
   const totHeld = sumv(c.held);
   const totLent = sumv(c.lent);
   const totOwe = sumv(c.owe);
-  const netUser = safeSub(safeAdd(tot, totLent), safeAdd(totHeld, totOwe));
-  const globShortage = totHeld > tot ? safeSub(totHeld, Math.max(0, tot)) : 0;
+
+  // Net user: Liquid Bank Cash + Lent - Kept - Owed to People - Credit Card Outstanding Debt
+  const netUser = safeSub(
+    safeAdd(totBank, totLent),
+    safeAdd(safeAdd(totHeld, totOwe), totCardDebt)
+  );
+
+  // Shortage check: does total bank cash cover all immediate obligations (kept money + credit card dues)?
+  const totalObligations = safeAdd(totHeld, totCardDebt);
+  const globShortage = totalObligations > totBank ? safeSub(totalObligations, Math.max(0, totBank)) : 0;
 
   return (
     <section>
       <h2>Your money right now</h2>
       <button className="row" onClick={() => setTab("c")}>
-        <span className="t">Cash in all accounts</span>
-        <span className="a">{fmt(tot, S.cur)}</span>
+        <span className="t">Cash in bank &amp; wallet</span>
+        <span className="a">{fmt(totBank, S.cur)}</span>
       </button>
+
+      {totCardDebt > 0.005 && (
+        <button className="row" onClick={() => setTab("c")}>
+          <span className="t" style={{ color: "var(--out)" }}>
+            <b>Credit card dues (Bank debt)</b><br />
+            <small style={{ color: "var(--out)" }}>Must be paid on due dates</small>
+          </span>
+          <span className="a out">− {fmt(totCardDebt, S.cur)}</span>
+        </button>
+      )}
 
       {totHeld > 0.005 && (
         <button className="row" onClick={() => setTab("p")}>
@@ -51,7 +92,7 @@ export function RightNowSection({ S, setTab }) {
       <div className="row" style={{ borderTop: "1.5px solid var(--line)", paddingTop: "10px" }}>
         <span className="t">
           <b>Your actual own money</b><br />
-          <small>Cash + Lent − Kept for others</small>
+          <small>Cash + Lent − Kept − Card Dues</small>
         </span>
         <span className={`a ${netUser >= 0 ? "in" : "out"}`} style={{ fontSize: "18px" }}>
           <b>{fmt(netUser, S.cur)}</b>
@@ -70,7 +111,7 @@ export function RightNowSection({ S, setTab }) {
           lineHeight: 1.4
         }}>
           <b style={{ color: "var(--out)" }}>⚠️ Total cash shortage: {fmt(globShortage, S.cur)}</b><br />
-          Total cash is <b>{fmt(tot, S.cur)}</b>, but you are keeping <b>{fmt(totHeld, S.cur)}</b> for others. Still short by <b>{fmt(globShortage, S.cur)}</b> to give everyone back right now.
+          Total bank cash is <b>{fmt(totBank, S.cur)}</b>, but you have <b>{fmt(totalObligations, S.cur)}</b> in dues ({fmt(totHeld, S.cur)} kept for others + {fmt(totCardDebt, S.cur)} credit card dues). Still short by <b>{fmt(globShortage, S.cur)}</b> to clear everything right now.
         </div>
       )}
     </section>
@@ -248,14 +289,29 @@ export function ActivityView({ S, M, filter, setFilter, onOpenTx }) {
   );
 }
 
-export function AccountsView({ S, setTab, onViewSource }) {
+export function AccountsView({ S, setTab, onViewSource, onViewCard }) {
   const c = calc(S);
+  const bankAccounts = S.accounts.filter((a) => a.type !== "card");
+  const cardAccounts = S.accounts.filter((a) => a.type === "card");
+
+  const totBank = bankAccounts.reduce((s, a) => safeAdd(s, c.bal[a.id] || 0), 0);
+  const totCardDebt = cardAccounts.reduce((s, a) => {
+    const b = c.bal[a.id] || 0;
+    return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+  }, 0);
+
   return (
     <>
       <RightNowSection S={S} setTab={setTab} />
+
+      {/* 1. Liquid Bank & Cash Accounts */}
       <section>
-        <h2>Accounts (Sources)</h2>
-        {S.accounts.map((a) => {
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <h2>Bank &amp; Cash (Liquid)</h2>
+          <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--ink)" }}>{fmt(totBank, S.cur)}</span>
+        </div>
+
+        {bankAccounts.map((a) => {
           const b = c.bal[a.id] || 0;
           const h = c.held[a.id] || 0;
           const l = c.lent[a.id] || 0;
@@ -302,8 +358,86 @@ export function AccountsView({ S, setTab, onViewSource }) {
             </button>
           );
         })}
-        <p className="note" style={{ marginTop: "12px" }}>
-          Tap any source to see its complete clarity breakdown (your money vs someone’s money vs shortage).
+        <p className="note" style={{ marginTop: "10px" }}>
+          Tap any bank account for its clarity breakdown (your money vs someone’s money vs shortage).
+        </p>
+      </section>
+
+      {/* 2. Credit Cards & Credit Lines */}
+      <section style={{ marginTop: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <h2>Credit Cards &amp; Credit Lines</h2>
+          {totCardDebt > 0 && (
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--out)" }}>
+              Due: {fmt(totCardDebt, S.cur)}
+            </span>
+          )}
+        </div>
+
+        {cardAccounts.length === 0 ? (
+          <div style={{ padding: "16px", background: "var(--card)", borderRadius: "12px", border: "1.5px dashed var(--line)", textAlign: "center", color: "var(--mute)", fontSize: "13.5px" }}>
+            No credit cards added yet.<br />
+            Tap <b>Add account</b> to add a RuPay or Visa card with limit &amp; statement billing cycle.
+          </div>
+        ) : (
+          cardAccounts.map((card) => {
+            const details = getCardDetails(card, S, c);
+            const isRupay = card.cardType === "rupay";
+            const utilColor = details.utilization > 70 ? "var(--out)" : details.utilization > 30 ? "#D9822B" : "var(--in)";
+
+            return (
+              <button key={card.id} className="row" onClick={() => onViewCard(card.id)} style={{ display: "block", padding: "12px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <b>{card.name}</b>
+                    <span style={{
+                      fontSize: "11px",
+                      fontWeight: 650,
+                      padding: "2px 6px",
+                      borderRadius: "6px",
+                      background: isRupay ? "rgba(11,122,99,0.12)" : "rgba(63,108,143,0.12)",
+                      color: isRupay ? "var(--in)" : "#3F6C8F"
+                    }}>
+                      {isRupay ? "⚡ RuPay UPI" : "💳 Card"}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontWeight: 600, color: details.debt > 0 ? "var(--out)" : "var(--in)" }}>
+                      {details.debt > 0 ? `− ${fmt(details.debt, S.cur)}` : "Cleared"}
+                    </span>
+                    <small style={{ display: "block", color: "var(--mute)", fontSize: "11.5px" }}>
+                      {details.debt > 0 ? "total due" : "no dues"}
+                    </small>
+                  </div>
+                </div>
+
+                {/* Credit limit utilization bar */}
+                <div className="mini" style={{ height: "6px", margin: "6px 0 8px" }}>
+                  <i style={{ width: `${Math.min(100, details.utilization)}%`, background: utilColor }} />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", color: "var(--mute)" }}>
+                  <span>
+                    Avail: <b style={{ color: "var(--ink)" }}>{fmt(details.available, S.cur)}</b> of {fmt(details.limit, S.cur)} ({details.utilization}%)
+                  </span>
+                  <span>
+                    {details.remainingBilled > 0 ? (
+                      <span style={{ color: "var(--out)", fontWeight: 500 }}>
+                        Bill: {fmt(details.remainingBilled, S.cur)} due {details.dueDay}th
+                      </span>
+                    ) : details.debt > 0 ? (
+                      <span style={{ color: "var(--in)", fontWeight: 500 }}>✓ Bill Cleared</span>
+                    ) : (
+                      "0 Dues"
+                    )}
+                  </span>
+                </div>
+              </button>
+            );
+          })
+        )}
+        <p className="note" style={{ marginTop: "10px" }}>
+          Tap any card to view statement, unbilled spends, or 1-tap clear your bill from your bank.
         </p>
       </section>
     </>

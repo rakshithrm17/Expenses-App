@@ -243,3 +243,37 @@ export function getActiveDebtors(S, kind, editingTxId = null) {
   }
   return list.sort((a, b) => b.amount - a.amount);
 }
+
+export function getCardDetails(card, S, c) {
+  const b = c.bal[card.id] || 0;
+  // If balance is negative, that is the outstanding liability/debt to the bank
+  const debt = b < 0 ? Math.abs(b) : 0;
+  const limit = safeMoney(card.limit || 0);
+  const available = Math.max(0, safeAdd(limit, b));
+  const utilization = limit > 0 ? Math.min(100, Math.round((debt / limit) * 100)) : 0;
+
+  // Payments made into this card via Transfer:
+  const payments = (S.txs || []).filter(
+    (t) => t.type === "transfer" && t.to === card.id && !t.skipAcct
+  );
+  const totalPaid = payments.reduce((acc, t) => safeAdd(acc, t.amount), 0);
+
+  const initialBilled = safeMoney(card.billedAmt || 0);
+  const remainingBilled = Math.min(debt, Math.max(0, safeSub(initialBilled, totalPaid)));
+  const unbilled = Math.max(0, safeSub(debt, remainingBilled));
+
+  return {
+    debt,
+    limit,
+    available,
+    utilization,
+    initialBilled,
+    totalPaid,
+    remainingBilled,
+    unbilled,
+    billDay: Number(card.billDay) || 1,
+    dueDay: Number(card.dueDay) || 1,
+    cardType: card.cardType || "normal",
+    isCleared: debt <= 0.005 || remainingBilled <= 0.005
+  };
+}
