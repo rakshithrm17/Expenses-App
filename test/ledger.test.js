@@ -12,8 +12,13 @@ import {
   stats,
   getPersonDebtInfo,
   checkClearance,
-  getActiveDebtors
+  getActiveDebtors,
+  getCardDetails,
+  fmt,
+  occ,
+  occTo
 } from "../src/utils/currency.js";
+import { getTestSeedState } from "../src/services/storageService.js";
 
 describe("Strict Paise Financial Math", () => {
   test("Zero floating point precision errors", () => {
@@ -542,6 +547,231 @@ describe("Multi-Account Lent & Repaid Lifecycle (Cash + 2 Banks)", () => {
     S.accounts[0].open = openVal;
     const c2 = calc(S);
     assert.equal(c2.bal["cash"], 7500, "Calibrating open balance correctly matches target reality");
+  });
+
+  test("Scenario 9: Complete Credit Card Lifecycle (RuPay UPI, Visa, Bill Payment & Net Liquidity)", () => {
+    // 1. Verify Test Seed Topology
+    const seed = getTestSeedState();
+    const cSeed = calc(seed);
+
+    // Liquid bank cash accounts:
+    // ICICI Salary: 85,000 (open) + 85,000 (salary) - 30,000 (tr to SBI) - 20,000 (tr to HDFC) = 120,000
+    assert.equal(cSeed.bal["icici-sal"], 120000);
+
+    // SBI Daily: 0 (open) + 30,000 (from ICICI) - 650 (Swiggy) - 4,000 (RuPay partial bill pay) = 25,350
+    assert.equal(cSeed.bal["sbi-daily"], 25350);
+
+    // HDFC Savings: 15,000 (open) + 20,000 (from ICICI) + 15,000 (Rahul kept) - 8,000 (Suresh lent) = 42,000
+    assert.equal(cSeed.bal["hdfc-savings"], 42000);
+
+    // Cash in wallet: 3,500
+    assert.equal(cSeed.bal["cash"], 3500);
+
+    // Total liquid bank cash: 120,000 + 25,350 + 42,000 + 3,500 = 190,850
+    const bankAccounts = seed.accounts.filter((a) => a.type !== "card");
+    const totBank = bankAccounts.reduce((s, a) => safeAdd(s, cSeed.bal[a.id] || 0), 0);
+    assert.equal(totBank, 190850);
+
+    // 2. RuPay Card Card Details:
+    // Tata Neu RuPay: limit 150,000, statement billed 8,450.
+    // Spends: -8450 (groc) - 250 (coffee UPI) - 2200 (fuel UPI) = -10,900.
+    // Bill payment from SBI: +4000.
+    // Outstanding debt: 10,900 - 4,000 = 6,900.
+    const rupayCard = seed.accounts.find((a) => a.id === "rupay-card");
+    const rupayDetails = getCardDetails(rupayCard, seed, cSeed);
+
+    assert.equal(cSeed.bal["rupay-card"], -6900);
+    assert.equal(rupayDetails.debt, 6900);
+    assert.equal(rupayDetails.limit, 150000);
+    assert.equal(rupayDetails.available, 143100); // 150000 - 6900
+    assert.equal(rupayDetails.utilization, 5); // 6900 / 150000 = 4.6% -> round 5%
+    assert.equal(rupayDetails.initialBilled, 8450);
+    assert.equal(rupayDetails.totalPaid, 4000);
+    assert.equal(rupayDetails.remainingBilled, 4450); // 8450 - 4000
+    assert.equal(rupayDetails.unbilled, 2450); // 6900 (total debt) - 4450 (remaining billed) = 2450 (250 coffee + 2200 fuel)
+    assert.equal(rupayDetails.billDay, 12);
+    assert.equal(rupayDetails.dueDay, 2);
+
+    // 3. Visa Card Details:
+    // HDFC Millennia Visa: limit 200,000, statement billed 14,200.
+    // Spends: -14200 (Amazon) - 1800 (Bills) = -16,000.
+    // Payments: 0.
+    // Outstanding debt: 16,000.
+    const visaCard = seed.accounts.find((a) => a.id === "visa-card");
+    const visaDetails = getCardDetails(visaCard, seed, cSeed);
+
+    assert.equal(cSeed.bal["visa-card"], -16000);
+    assert.equal(visaDetails.debt, 16000);
+    assert.equal(visaDetails.limit, 200000);
+    assert.equal(visaDetails.available, 184000); // 200000 - 16000
+    assert.equal(visaDetails.utilization, 8); // 16000 / 200000 = 8%
+    assert.equal(visaDetails.remainingBilled, 14200);
+    assert.equal(visaDetails.unbilled, 1800); // 16000 - 14200
+
+    // 4. Total Card Debts across both cards:
+    const cardAccounts = seed.accounts.filter((a) => a.type === "card");
+    const totCardDebt = cardAccounts.reduce((s, a) => {
+      const b = cSeed.bal[a.id] || 0;
+      return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+    }, 0);
+    assert.equal(totCardDebt, 22900); // 6900 + 16000
+
+    // 5. Net User Worth & Clarity Check:
+    // Liquid Bank Cash (190,850) + Lent to Suresh (8,000) - Rahul Kept (15,000) - People Owe (0) - Card Dues (22,900)
+    // 190,850 + 8,000 - 15,000 - 22,900 = 160,950
+    const netUser = safeSub(
+      safeAdd(totBank, cSeed.lent["hdfc-savings"]),
+      safeAdd(safeAdd(cSeed.held["hdfc-savings"], 0), totCardDebt)
+    );
+    assert.equal(netUser, 160950);
+
+    // 6. Test 1-Tap Bill Payment Clearing Remaining Dues:
+    // User clears remaining ₹4,450 on RuPay Card via Transfer from SBI
+    seed.txs.push({
+      id: "clear-rupay-bill",
+      type: "transfer",
+      amount: 4450,
+      acct: "sbi-daily",
+      to: "rupay-card",
+      note: "Full statement clearance",
+      date: "2026-11-09"
+    });
+
+    const cAfterClear = calc(seed);
+    const rupayAfterClear = getCardDetails(rupayCard, seed, cAfterClear);
+    assert.equal(rupayAfterClear.remainingBilled, 0, "Billed statement must be fully 0 / cleared");
+    assert.equal(rupayAfterClear.debt, 2450, "Only unbilled recent spends remain");
+    assert.equal(rupayAfterClear.unbilled, 2450);
+    assert.equal(cAfterClear.bal["sbi-daily"], 20900); // 25350 - 4450
+
+    // 7. Fractional Paise Precision on Card:
+    seed.txs.push({
+      id: "fractional-rupay",
+      type: "expense",
+      amount: 49.99,
+      acct: "rupay-card",
+      cat: "food",
+      note: "Chai QR scan",
+      date: "2026-11-09"
+    });
+    const cFrac = calc(seed);
+    const rupayFrac = getCardDetails(rupayCard, seed, cFrac);
+    assert.equal(cFrac.bal["rupay-card"], -2499.99);
+    assert.equal(rupayFrac.debt, 2499.99);
+    assert.equal(rupayFrac.available, 147500.01);
+  });
+
+  test("Scenario 10: Adversarial Edge Cases & Stress Testing (Trying to Break the Ledger)", () => {
+    // 1. Negative Zero formatting bug prevention
+    assert.equal(fmt(0), "₹0");
+    assert.equal(fmt(-0), "₹0", "Formatting -0 must produce ₹0, never -₹0");
+    assert.equal(fmt(-0.0001), "₹0", "Sub-paise epsilon must produce ₹0");
+
+    // 2. Comma and whitespace formatting inputs
+    assert.equal(safeMoney("  1,50,000.50  "), 150000.5);
+    assert.equal(safeMoney(""), 0);
+    assert.equal(safeMoney(null), 0);
+    assert.equal(safeMoney(undefined), 0);
+    assert.equal(safeMoney("invalid-text"), 0);
+
+    // 3. Multi-Crore Large Figures without floating-point degradation
+    const croreAdd = safeAdd("99,00,00,000.99", "1,00,00,000.01");
+    assert.equal(croreAdd, 1000000001); // 100 Crores + 1 rupee
+    assert.equal(safeSub("1000000001", "0.99"), 1000000000.01);
+
+    // 4. Credit Card Overpayment (Surplus balance)
+    const cardState = {
+      cur: "INR",
+      accounts: [
+        { id: "bank", name: "Savings", type: "bank", open: 50000 },
+        { id: "card", name: "RuPay Card", type: "card", cardType: "rupay", limit: 100000, billedAmt: 5000, open: 0 }
+      ],
+      txs: [
+        // Spends 5,000
+        { id: "sp1", type: "expense", amount: 5000, acct: "card", cat: "groc", date: "2026-11-01" },
+        // User pays 8,000 from Bank (3,000 OVERPAYMENT / excess credit!)
+        { id: "pay1", type: "transfer", amount: 8000, acct: "bank", to: "card", date: "2026-11-02" }
+      ]
+    };
+
+    let cCard = calc(cardState);
+    assert.equal(cCard.bal["bank"], 42000); // 50,000 - 8,000
+    assert.equal(cCard.bal["card"], 3000); // +3,000 surplus credit sitting on card!
+
+    let details = getCardDetails(cardState.accounts[1], cardState, cCard);
+    assert.equal(details.debt, 0, "Debt must be 0 when card is overpaid");
+    assert.equal(details.available, 103000, "Available limit expands to Limit (100k) + Surplus (3k) = 103,000");
+    assert.equal(details.utilization, 0);
+    assert.equal(details.remainingBilled, 0);
+    assert.equal(details.unbilled, 0);
+    assert.equal(details.isCleared, true);
+
+    // Verify Net User wealth with card overpayment surplus:
+    // Bank (42,000) + Card Surplus (3,000) = 45,000 (User started with 50k, spent 5k, has 45k net!)
+    const bankAccounts = cardState.accounts.filter((a) => a.type !== "card");
+    const cardAccounts = cardState.accounts.filter((a) => a.type === "card");
+    const totBank = bankAccounts.reduce((s, a) => safeAdd(s, cCard.bal[a.id] || 0), 0);
+    const totCardDebt = cardAccounts.reduce((s, a) => {
+      const b = cCard.bal[a.id] || 0;
+      return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+    }, 0);
+    const totCardSurplus = cardAccounts.reduce((s, a) => {
+      const b = cCard.bal[a.id] || 0;
+      return b > 0 ? safeAdd(s, b) : s;
+    }, 0);
+    const netUser = safeSub(safeAdd(totBank, totCardSurplus), totCardDebt);
+    assert.equal(netUser, 45000, "Net user wealth preserves card overpayment surplus");
+
+    // 5. Merchant Refund into Credit Card reduces bill
+    cardState.txs.push({
+      id: "ref1",
+      type: "income",
+      amount: 1500,
+      acct: "card",
+      note: "Amazon Return Refund",
+      date: "2026-11-03"
+    });
+    cCard = calc(cardState);
+    assert.equal(cCard.bal["card"], 4500); // 3,000 + 1,500 refund = +4,500
+
+    // 6. Overdrawn Negative Bank Balance & Shortage Calculation
+    const overdrawnState = {
+      cur: "INR",
+      accounts: [
+        { id: "od-bank", name: "Overdrawn Account", type: "bank", open: -2000 }
+      ],
+      txs: [
+        // Holding 5,000 for Rahul
+        { id: "hold1", type: "people", kind: "hold", amount: 5000, person: "Rahul", acct: "od-bank", date: "2026-11-01" }
+      ]
+    };
+    const cOD = calc(overdrawnState);
+    // Balance is -2,000 + 5,000 (held) = +3,000
+    assert.equal(cOD.bal["od-bank"], 3000);
+    assert.equal(cOD.held["od-bank"], 5000);
+    // Shortage: To return 5,000 when bank only has 3,000, shortage is exactly 2,000!
+    const obligations = cOD.held["od-bank"];
+    const shortage = obligations > cOD.bal["od-bank"] ? safeSub(obligations, cOD.bal["od-bank"]) : 0;
+    assert.equal(shortage, 2000);
+
+    // 7. Case-Insensitive and Whitespace-Padded Contact Names
+    const peopleState = {
+      cur: "INR",
+      accounts: [{ id: "cash", name: "Cash", open: 10000 }],
+      txs: [
+        { id: "p1", type: "people", kind: "lend", amount: 1000, person: "  RAHUL  ", acct: "cash", date: "2026-11-01" },
+        { id: "p2", type: "people", kind: "lend", amount: 2000, person: "rahul", acct: "cash", date: "2026-11-02" },
+        { id: "p3", type: "people", kind: "collect", amount: 500, person: "Rahul", acct: "cash", date: "2026-11-03" }
+      ]
+    };
+    const cPeople = calc(peopleState);
+    assert.equal(cPeople.P["rahul"].owed, 2500, "Whitespace and case variations must unify to single contact");
+
+    // 8. Occ & OccTo Boundary Behavior
+    const recTx = { date: "2026-01-10", repeat: true, until: "2026-03" };
+    assert.equal(occTo(recTx, "2026-05"), 3, "Repeats until March must occur exactly 3 times");
+    assert.equal(occ(recTx, "2026-03"), 1);
+    assert.equal(occ(recTx, "2026-04"), 0);
   });
 });
 

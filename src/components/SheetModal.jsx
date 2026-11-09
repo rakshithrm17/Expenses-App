@@ -17,12 +17,23 @@ import {
   eff,
   getPersonDebtInfo,
   checkClearance,
-  getActiveDebtors
+  getActiveDebtors,
+  getCardDetails
 } from "../utils/currency";
 
 export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateState, setModal }) {
   const [D, setD] = useState(null);
-  const [acctForm, setAcctForm] = useState({ id: "", name: "", open: "" });
+  const [acctForm, setAcctForm] = useState({
+    id: "",
+    name: "",
+    open: "",
+    type: "bank",
+    cardType: "rupay",
+    limit: "",
+    billDay: "12",
+    dueDay: "2",
+    billedAmt: ""
+  });
 
   useEffect(() => {
     if (!modal) return;
@@ -41,10 +52,32 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
             }
       );
     } else if (modal.mode === "acct") {
-      const a = S.accounts.find((x) => x.id === modal.id) || { name: "", open: "" };
+      const a = S.accounts.find((x) => x.id === modal.id) || {
+        name: "",
+        open: "",
+        type: "bank",
+        cardType: "rupay",
+        limit: "",
+        billDay: "12",
+        dueDay: "2",
+        billedAmt: ""
+      };
       const c = calc(S);
-      const curVal = modal.id && modal.id in c.bal ? c.bal[modal.id] : a.open;
-      setAcctForm({ id: modal.id || "", name: a.name, open: curVal });
+      const isCard = a.type === "card";
+      let curVal = modal.id && modal.id in c.bal ? c.bal[modal.id] : a.open;
+      if (isCard && curVal < 0) curVal = Math.abs(curVal);
+
+      setAcctForm({
+        id: modal.id || "",
+        name: a.name,
+        open: curVal || "",
+        type: a.type || "bank",
+        cardType: a.cardType || "rupay",
+        limit: a.limit || "",
+        billDay: a.billDay || "12",
+        dueDay: a.dueDay || "2",
+        billedAmt: a.billedAmt || ""
+      });
     }
   }, [modal, S, M]);
 
@@ -270,11 +303,176 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
     );
   }
 
+  if (modal.mode === "card") {
+    const card = S.accounts.find((x) => x.id === modal.id);
+    if (!card) return null;
+    const c = calc(S);
+    const details = getCardDetails(card, S, c);
+    const isRupay = card.cardType === "rupay";
+    const utilColor = details.utilization > 70 ? "var(--out)" : details.utilization > 30 ? "#D9822B" : "var(--in)";
+
+    const defaultBank = S.accounts.find((a) => a.type !== "card") || S.accounts[0];
+    const payAmt = details.remainingBilled > 0 ? details.remainingBilled : details.debt;
+
+    const hist = S.txs
+      .filter((t) => t.acct === card.id || t.to === card.id)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    return (
+      <div id="scrim" className="on" onClick={(e) => e.target.id === "scrim" && closeSheet()}>
+        <div id="sheet">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <h3 style={{ margin: 0 }}>{card.name}</h3>
+            <span style={{
+              fontSize: "12px",
+              fontWeight: 650,
+              padding: "4px 8px",
+              borderRadius: "6px",
+              background: isRupay ? "rgba(11,122,99,0.12)" : "rgba(63,108,143,0.12)",
+              color: isRupay ? "var(--in)" : "#3F6C8F"
+            }}>
+              {isRupay ? "⚡ RuPay UPI (QR Scan)" : "💳 Credit Card"}
+            </span>
+          </div>
+
+          {/* Card Overview Box */}
+          <div style={{ background: "var(--bg)", borderRadius: "12px", padding: "14px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+              <span>Available Limit:</span>
+              <b style={{ color: "var(--in)" }}>{fmt(details.available, S.cur)}</b>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+              <span>Total Credit Limit:</span>
+              <b>{fmt(details.limit, S.cur)}</b>
+            </div>
+
+            {/* Utilization progress */}
+            <div style={{ margin: "8px 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", color: "var(--mute)", marginBottom: "4px" }}>
+                <span>Credit Utilized</span>
+                <b style={{ color: utilColor }}>{details.utilization}%</b>
+              </div>
+              <div className="mini" style={{ height: "8px", margin: 0 }}>
+                <i style={{ width: `${Math.min(100, details.utilization)}%`, background: utilColor }} />
+              </div>
+            </div>
+
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              borderTop: "1.5px solid var(--line)",
+              paddingTop: "10px",
+              marginTop: "8px"
+            }}>
+              <span><b>Total Outstanding (Debt):</b></span>
+              <b style={{ color: details.debt > 0 ? "var(--out)" : "var(--in)", fontSize: "17px" }}>
+                {details.debt > 0 ? `− ${fmt(details.debt, S.cur)}` : "₹0 (No dues)"}
+              </b>
+            </div>
+          </div>
+
+          {/* Statement & Due Details */}
+          <div style={{ background: "var(--card)", border: "1.5px solid var(--line)", borderRadius: "12px", padding: "14px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--mute)", marginBottom: "8px" }}>
+              <span>Statement Generation:</span>
+              <b style={{ color: "var(--ink)" }}>{details.billDay}th of every month</b>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--mute)", marginBottom: "8px" }}>
+              <span>Payment Due Date:</span>
+              <b style={{ color: "var(--ink)" }}>{details.dueDay}th of every month</b>
+            </div>
+
+            <div style={{ borderTop: "1px dashed var(--line)", paddingTop: "8px", marginTop: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <span>
+                  <b>Billed Statement Due:</b><br />
+                  <small style={{ color: "var(--mute)" }}>
+                    {details.initialBilled > 0
+                      ? `Bill: ${fmt(details.initialBilled, S.cur)} | Paid: ${fmt(details.totalPaid, S.cur)}`
+                      : "Generated statement due"}
+                  </small>
+                </span>
+                <b style={{ color: details.remainingBilled > 0 ? "var(--out)" : "var(--in)", fontSize: "15px" }}>
+                  {details.remainingBilled > 0 ? fmt(details.remainingBilled, S.cur) : "✓ Cleared"}
+                </b>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+                <span>
+                  <b>Unbilled Spends:</b><br />
+                  <small style={{ color: "var(--mute)" }}>Spends made after latest statement</small>
+                </span>
+                <b style={{ color: details.unbilled > 0 ? "var(--ink)" : "var(--mute)", fontSize: "15px" }}>
+                  {fmt(details.unbilled, S.cur)}
+                </b>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="acts" style={{ flexWrap: "wrap", marginBottom: "16px" }}>
+            {payAmt > 0 && defaultBank && (
+              <button
+                className="btn"
+                onClick={() =>
+                  setModal({
+                    mode: "tx",
+                    id: "",
+                    pre: {
+                      type: "transfer",
+                      acct: defaultBank.id,
+                      to: card.id,
+                      amount: payAmt.toString(),
+                      note: details.remainingBilled > 0 ? `Bill payment for ${card.name}` : `Clear card dues for ${card.name}`
+                    }
+                  })
+                }
+              >
+                ✓ Pay {fmt(payAmt, S.cur)} from {defaultBank.name}
+              </button>
+            )}
+            <button className="btn sec" onClick={() => setModal({ mode: "acct", id: card.id })}>
+              Edit Card / Limit
+            </button>
+            <button className="btn sec" onClick={closeSheet}>
+              Close
+            </button>
+          </div>
+
+          {/* History on this card */}
+          <h2 style={{ marginTop: "16px" }}>Card Activity ({hist.length})</h2>
+          {hist.length === 0 ? (
+            <p className="note">No transactions recorded on this card yet.</p>
+          ) : (
+            hist.map((t) => (
+              <button key={t.id} className="row" onClick={() => setModal({ mode: "tx", id: t.id })}>
+                <span className="t">
+                  <div>{txTitle(t)}</div>
+                  <small>
+                    {t.date} · {t.type === "transfer" ? (t.to === card.id ? `Bill Paid from ${getAcc(S.accounts, t.acct).name}` : `Transfer to ${getAcc(S.accounts, t.to).name}`) : getAcc(S.accounts, t.acct).name}
+                  </small>
+                </span>
+                <span className={`a ${t.type === "transfer" && t.to === card.id ? "in" : "out"}`}>
+                  {t.type === "transfer" && t.to === card.id ? `+ ${fmt(t.amount, S.cur)}` : `− ${fmt(t.amount, S.cur)}`}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (modal.mode === "acct") {
+    const isCard = acctForm.type === "card";
+
     const saveAcct = () => {
       const n = acctForm.name.trim();
       if (!n) return;
-      const targetBal = safeMoney(acctForm.open);
+      const targetBal = isCard
+        ? -Math.abs(safeMoney(acctForm.open))
+        : safeMoney(acctForm.open);
+
       let openVal = targetBal;
       if (acctForm.id) {
         const now = ym(new Date());
@@ -288,7 +486,19 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
         }
         openVal = safeSub(targetBal, txSum);
       }
-      const o = { id: acctForm.id || uid(), name: n, open: openVal };
+      const o = {
+        id: acctForm.id || uid(),
+        name: n,
+        type: isCard ? "card" : "bank",
+        open: openVal
+      };
+      if (isCard) {
+        o.cardType = acctForm.cardType || "rupay";
+        o.limit = safeMoney(acctForm.limit);
+        o.billDay = Math.min(31, Math.max(1, parseInt(acctForm.billDay, 10) || 1));
+        o.dueDay = Math.min(31, Math.max(1, parseInt(acctForm.dueDay, 10) || 1));
+        o.billedAmt = safeMoney(acctForm.billedAmt);
+      }
       const next = [...S.accounts];
       const idx = next.findIndex((x) => x.id === o.id);
       if (idx >= 0) next[idx] = o;
@@ -309,12 +519,121 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
     return (
       <div id="scrim" className="on" onClick={(e) => e.target.id === "scrim" && closeSheet()}>
         <div id="sheet">
-          <h3>{acctForm.id ? "Edit account" : "New account"}</h3>
-          <label>Name</label>
-          <input value={acctForm.name} onChange={(e) => setAcctForm({ ...acctForm, name: e.target.value })} placeholder="HDFC, BOB, Karnataka Bank, Cash…" />
-          <label>Balance right now (in your bank/cash today)</label>
-          <input inputMode="decimal" value={acctForm.open} onChange={(e) => setAcctForm({ ...acctForm, open: e.target.value })} placeholder="0" />
-          <p className="note">Enter what is actually in this account today. It automatically calibrates your balance to match reality.</p>
+          <h3>{acctForm.id ? (isCard ? "Edit Credit Card" : "Edit Account") : "New Account / Card"}</h3>
+
+          {!acctForm.id && (
+            <div className="seg" style={{ marginBottom: "14px" }}>
+              <button
+                type="button"
+                className={acctForm.type !== "card" ? "on" : ""}
+                onClick={() => setAcctForm({ ...acctForm, type: "bank" })}
+              >
+                🏦 Bank / Cash
+              </button>
+              <button
+                type="button"
+                className={acctForm.type === "card" ? "on" : ""}
+                onClick={() => setAcctForm({ ...acctForm, type: "card" })}
+              >
+                💳 Credit Card
+              </button>
+            </div>
+          )}
+
+          <label>{isCard ? "Card Name" : "Account Name"}</label>
+          <input
+            value={acctForm.name}
+            onChange={(e) => setAcctForm({ ...acctForm, name: e.target.value })}
+            placeholder={isCard ? "Tata Neu RuPay, HDFC Millennia…" : "HDFC, SBI, Karnataka Bank, Cash…"}
+          />
+
+          {isCard ? (
+            <>
+              <label>Card Type / Network</label>
+              <div className="seg" style={{ marginTop: "6px", marginBottom: "8px" }}>
+                <button
+                  type="button"
+                  className={acctForm.cardType === "rupay" ? "on" : ""}
+                  onClick={() => setAcctForm({ ...acctForm, cardType: "rupay" })}
+                >
+                  ⚡ RuPay UPI (QR Scan)
+                </button>
+                <button
+                  type="button"
+                  className={acctForm.cardType !== "rupay" ? "on" : ""}
+                  onClick={() => setAcctForm({ ...acctForm, cardType: "visa" })}
+                >
+                  💳 Visa / Mastercard
+                </button>
+              </div>
+
+              <label>Total Credit Limit (₹)</label>
+              <input
+                inputMode="decimal"
+                value={acctForm.limit}
+                onChange={(e) => setAcctForm({ ...acctForm, limit: e.target.value })}
+                placeholder="e.g. 150000"
+              />
+
+              <div style={{ display: "flex", gap: "12px" }}>
+                <div style={{ flex: 1 }}>
+                  <label>Statement Day (1-31)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={acctForm.billDay}
+                    onChange={(e) => setAcctForm({ ...acctForm, billDay: e.target.value })}
+                    placeholder="12"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Due Day (1-31)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={acctForm.dueDay}
+                    onChange={(e) => setAcctForm({ ...acctForm, dueDay: e.target.value })}
+                    placeholder="2"
+                  />
+                </div>
+              </div>
+
+              <label>Latest Billed Statement Amount Due (₹)</label>
+              <input
+                inputMode="decimal"
+                value={acctForm.billedAmt}
+                onChange={(e) => setAcctForm({ ...acctForm, billedAmt: e.target.value })}
+                placeholder="0"
+              />
+
+              <label>Current Total Debt / Unpaid Balance (₹)</label>
+              <input
+                inputMode="decimal"
+                value={acctForm.open}
+                onChange={(e) => setAcctForm({ ...acctForm, open: e.target.value })}
+                placeholder="0"
+              />
+              <p className="note">
+                Enter total amount you currently owe on this card. Available limit will automatically calibrate to (Limit − Total Dues).
+              </p>
+            </>
+          ) : (
+            <>
+              <label>Balance right now (in your bank/cash today)</label>
+              <input
+                inputMode="decimal"
+                value={acctForm.open}
+                onChange={(e) => setAcctForm({ ...acctForm, open: e.target.value })}
+                placeholder="0"
+              />
+              <p className="note">
+                Enter what is actually in this account today. It automatically calibrates your balance to match reality.
+              </p>
+            </>
+          )}
+
           <div className="acts">
             {acctForm.id ? <button className="btn del" onClick={delAcct}>Delete</button> : <button className="btn sec" onClick={closeSheet}>Cancel</button>}
             <button className="btn" onClick={saveAcct}>Save</button>
@@ -460,7 +779,9 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
             <label>Paid from</label>
             <select value={D.acct} onChange={(e) => setD({ ...D, acct: e.target.value })}>
               {S.accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.name} {a.type === "card" ? (a.cardType === "rupay" ? "(⚡ RuPay UPI)" : "(💳 Card)") : ""}
+                </option>
               ))}
             </select>
             <label>Note (optional)</label>
@@ -480,7 +801,9 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
             <label>Received in</label>
             <select value={D.acct} onChange={(e) => setD({ ...D, acct: e.target.value })}>
               {S.accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.name} {a.type === "card" ? (a.cardType === "rupay" ? "(⚡ RuPay UPI)" : "(💳 Card)") : ""}
+                </option>
               ))}
             </select>
             <label><b>Income type</b></label>
@@ -513,13 +836,17 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
             <label>From</label>
             <select value={D.acct} onChange={(e) => setD({ ...D, acct: e.target.value })}>
               {S.accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.name} {a.type === "card" ? (a.cardType === "rupay" ? "(⚡ RuPay UPI)" : "(💳 Card)") : ""}
+                </option>
               ))}
             </select>
             <label>To</label>
             <select value={D.to} onChange={(e) => setD({ ...D, to: e.target.value })}>
               {S.accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.name} {a.type === "card" ? (a.cardType === "rupay" ? "(⚡ RuPay UPI)" : "(💳 Card)") : ""}
+                </option>
               ))}
             </select>
             <label>Note (optional)</label>
@@ -624,7 +951,9 @@ export default function SheetModal({ modal, closeSheet, S, M, setM, tab, updateS
             <label>{KINDS[D.kind]?.in ? "Money came into" : "Money went out of"}</label>
             <select value={D.acct} onChange={(e) => setD({ ...D, acct: e.target.value })}>
               {S.accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.name} {a.type === "card" ? (a.cardType === "rupay" ? "(⚡ RuPay UPI)" : "(💳 Card)") : ""}
+                </option>
               ))}
             </select>
             <label><b>Transaction type</b></label>
