@@ -13,7 +13,10 @@ import {
   getPersonDebtInfo,
   checkClearance,
   getActiveDebtors,
-  getCardDetails
+  getCardDetails,
+  fmt,
+  occ,
+  occTo
 } from "../src/utils/currency.js";
 import { getTestSeedState } from "../src/services/storageService.js";
 
@@ -656,6 +659,119 @@ describe("Multi-Account Lent & Repaid Lifecycle (Cash + 2 Banks)", () => {
     assert.equal(cFrac.bal["rupay-card"], -2499.99);
     assert.equal(rupayFrac.debt, 2499.99);
     assert.equal(rupayFrac.available, 147500.01);
+  });
+
+  test("Scenario 10: Adversarial Edge Cases & Stress Testing (Trying to Break the Ledger)", () => {
+    // 1. Negative Zero formatting bug prevention
+    assert.equal(fmt(0), "₹0");
+    assert.equal(fmt(-0), "₹0", "Formatting -0 must produce ₹0, never -₹0");
+    assert.equal(fmt(-0.0001), "₹0", "Sub-paise epsilon must produce ₹0");
+
+    // 2. Comma and whitespace formatting inputs
+    assert.equal(safeMoney("  1,50,000.50  "), 150000.5);
+    assert.equal(safeMoney(""), 0);
+    assert.equal(safeMoney(null), 0);
+    assert.equal(safeMoney(undefined), 0);
+    assert.equal(safeMoney("invalid-text"), 0);
+
+    // 3. Multi-Crore Large Figures without floating-point degradation
+    const croreAdd = safeAdd("99,00,00,000.99", "1,00,00,000.01");
+    assert.equal(croreAdd, 1000000001); // 100 Crores + 1 rupee
+    assert.equal(safeSub("1000000001", "0.99"), 1000000000.01);
+
+    // 4. Credit Card Overpayment (Surplus balance)
+    const cardState = {
+      cur: "INR",
+      accounts: [
+        { id: "bank", name: "Savings", type: "bank", open: 50000 },
+        { id: "card", name: "RuPay Card", type: "card", cardType: "rupay", limit: 100000, billedAmt: 5000, open: 0 }
+      ],
+      txs: [
+        // Spends 5,000
+        { id: "sp1", type: "expense", amount: 5000, acct: "card", cat: "groc", date: "2026-11-01" },
+        // User pays 8,000 from Bank (3,000 OVERPAYMENT / excess credit!)
+        { id: "pay1", type: "transfer", amount: 8000, acct: "bank", to: "card", date: "2026-11-02" }
+      ]
+    };
+
+    let cCard = calc(cardState);
+    assert.equal(cCard.bal["bank"], 42000); // 50,000 - 8,000
+    assert.equal(cCard.bal["card"], 3000); // +3,000 surplus credit sitting on card!
+
+    let details = getCardDetails(cardState.accounts[1], cardState, cCard);
+    assert.equal(details.debt, 0, "Debt must be 0 when card is overpaid");
+    assert.equal(details.available, 103000, "Available limit expands to Limit (100k) + Surplus (3k) = 103,000");
+    assert.equal(details.utilization, 0);
+    assert.equal(details.remainingBilled, 0);
+    assert.equal(details.unbilled, 0);
+    assert.equal(details.isCleared, true);
+
+    // Verify Net User wealth with card overpayment surplus:
+    // Bank (42,000) + Card Surplus (3,000) = 45,000 (User started with 50k, spent 5k, has 45k net!)
+    const bankAccounts = cardState.accounts.filter((a) => a.type !== "card");
+    const cardAccounts = cardState.accounts.filter((a) => a.type === "card");
+    const totBank = bankAccounts.reduce((s, a) => safeAdd(s, cCard.bal[a.id] || 0), 0);
+    const totCardDebt = cardAccounts.reduce((s, a) => {
+      const b = cCard.bal[a.id] || 0;
+      return b < 0 ? safeAdd(s, Math.abs(b)) : s;
+    }, 0);
+    const totCardSurplus = cardAccounts.reduce((s, a) => {
+      const b = cCard.bal[a.id] || 0;
+      return b > 0 ? safeAdd(s, b) : s;
+    }, 0);
+    const netUser = safeSub(safeAdd(totBank, totCardSurplus), totCardDebt);
+    assert.equal(netUser, 45000, "Net user wealth preserves card overpayment surplus");
+
+    // 5. Merchant Refund into Credit Card reduces bill
+    cardState.txs.push({
+      id: "ref1",
+      type: "income",
+      amount: 1500,
+      acct: "card",
+      note: "Amazon Return Refund",
+      date: "2026-11-03"
+    });
+    cCard = calc(cardState);
+    assert.equal(cCard.bal["card"], 4500); // 3,000 + 1,500 refund = +4,500
+
+    // 6. Overdrawn Negative Bank Balance & Shortage Calculation
+    const overdrawnState = {
+      cur: "INR",
+      accounts: [
+        { id: "od-bank", name: "Overdrawn Account", type: "bank", open: -2000 }
+      ],
+      txs: [
+        // Holding 5,000 for Rahul
+        { id: "hold1", type: "people", kind: "hold", amount: 5000, person: "Rahul", acct: "od-bank", date: "2026-11-01" }
+      ]
+    };
+    const cOD = calc(overdrawnState);
+    // Balance is -2,000 + 5,000 (held) = +3,000
+    assert.equal(cOD.bal["od-bank"], 3000);
+    assert.equal(cOD.held["od-bank"], 5000);
+    // Shortage: To return 5,000 when bank only has 3,000, shortage is exactly 2,000!
+    const obligations = cOD.held["od-bank"];
+    const shortage = obligations > cOD.bal["od-bank"] ? safeSub(obligations, cOD.bal["od-bank"]) : 0;
+    assert.equal(shortage, 2000);
+
+    // 7. Case-Insensitive and Whitespace-Padded Contact Names
+    const peopleState = {
+      cur: "INR",
+      accounts: [{ id: "cash", name: "Cash", open: 10000 }],
+      txs: [
+        { id: "p1", type: "people", kind: "lend", amount: 1000, person: "  RAHUL  ", acct: "cash", date: "2026-11-01" },
+        { id: "p2", type: "people", kind: "lend", amount: 2000, person: "rahul", acct: "cash", date: "2026-11-02" },
+        { id: "p3", type: "people", kind: "collect", amount: 500, person: "Rahul", acct: "cash", date: "2026-11-03" }
+      ]
+    };
+    const cPeople = calc(peopleState);
+    assert.equal(cPeople.P["rahul"].owed, 2500, "Whitespace and case variations must unify to single contact");
+
+    // 8. Occ & OccTo Boundary Behavior
+    const recTx = { date: "2026-01-10", repeat: true, until: "2026-03" };
+    assert.equal(occTo(recTx, "2026-05"), 3, "Repeats until March must occur exactly 3 times");
+    assert.equal(occ(recTx, "2026-03"), 1);
+    assert.equal(occ(recTx, "2026-04"), 0);
   });
 });
 

@@ -27,20 +27,24 @@ export function RightNowSection({ S, setTab }) {
     const b = c.bal[a.id] || 0;
     return b < 0 ? safeAdd(s, Math.abs(b)) : s;
   }, 0);
+  const totCardSurplus = cardAccounts.reduce((s, a) => {
+    const b = c.bal[a.id] || 0;
+    return b > 0 ? safeAdd(s, b) : s;
+  }, 0);
 
   const totHeld = sumv(c.held);
   const totLent = sumv(c.lent);
   const totOwe = sumv(c.owe);
 
-  // Net user: Liquid Bank Cash + Lent - Kept - Owed to People - Credit Card Outstanding Debt
+  // Net user: Liquid Bank Cash + Card Overpayment Surplus + Lent - Kept - Owed to People - Credit Card Outstanding Debt
   const netUser = safeSub(
-    safeAdd(totBank, totLent),
+    safeAdd(safeAdd(totBank, totCardSurplus), totLent),
     safeAdd(safeAdd(totHeld, totOwe), totCardDebt)
   );
 
   // Shortage check: does total bank cash cover all immediate obligations (kept money + credit card dues)?
   const totalObligations = safeAdd(totHeld, totCardDebt);
-  const globShortage = totalObligations > totBank ? safeSub(totalObligations, Math.max(0, totBank)) : 0;
+  const globShortage = totalObligations > totBank ? safeSub(totalObligations, totBank) : 0;
 
   return (
     <section style={{ position: "relative", overflow: "hidden" }}>

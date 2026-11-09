@@ -31,7 +31,8 @@ export const shift = (m, k) => {
 };
 
 export const fmt = (n, cur = "INR") => {
-  const clean = safeMoney(n);
+  let clean = safeMoney(n);
+  if (Math.abs(clean) < 0.005) clean = 0;
   const hasDecimals = toPaise(clean) % 100 !== 0;
   return new Intl.NumberFormat(cur === "INR" ? "en-IN" : "en-US", {
     style: "currency",
@@ -45,13 +46,13 @@ export const getAcc = (accounts, id) => accounts.find((a) => a.id === id) || { n
 export const sumv = (o) => Object.values(o).reduce((a, b) => safeAdd(a, b), 0);
 
 export function occ(t, m) {
-  const s = t.date.slice(0, 7);
+  const s = (t.date || "").slice(0, 7) || m;
   if (!t.repeat) return s === m ? 1 : 0;
   return s > m || (t.until && m > t.until) ? 0 : 1;
 }
 
 export function occTo(t, m) {
-  const s = t.date.slice(0, 7);
+  const s = (t.date || "").slice(0, 7) || m;
   if (s > m) return 0;
   if (!t.repeat) return 1;
   const e = t.until && t.until < m ? t.until : m;
@@ -60,11 +61,12 @@ export function occTo(t, m) {
   return (b.y - a.y) * 12 + b.o - a.o + 1;
 }
 
-export const dayOf = (t, m) => Math.min(+t.date.slice(8, 10), mi(m).n);
+export const dayOf = (t, m) => Math.min(+(t.date || "").slice(8, 10) || 1, mi(m).n);
 
 export function eff(t) {
   if (t.skipAcct) return [];
   const amt = safeMoney(t.amount);
+  if (amt <= 0) return [];
   if (t.type === "income") return [[t.acct, amt]];
   if (t.type === "expense") return [[t.acct, -amt]];
   if (t.type === "transfer") return [[t.acct, -amt], [t.to, amt]];
@@ -252,9 +254,12 @@ export function getCardDetails(card, S, c) {
   const available = Math.max(0, safeAdd(limit, b));
   const utilization = limit > 0 ? Math.min(100, Math.round((debt / limit) * 100)) : 0;
 
-  // Payments made into this card via Transfer:
+  // Payments or incoming credits into this card (bill transfer payments, refunds, cashbacks):
   const payments = (S.txs || []).filter(
-    (t) => t.type === "transfer" && t.to === card.id && !t.skipAcct
+    (t) =>
+      !t.skipAcct &&
+      ((t.type === "transfer" && t.to === card.id) ||
+       (t.type === "income" && t.acct === card.id))
   );
   const totalPaid = payments.reduce((acc, t) => safeAdd(acc, t.amount), 0);
 
@@ -271,8 +276,8 @@ export function getCardDetails(card, S, c) {
     totalPaid,
     remainingBilled,
     unbilled,
-    billDay: Number(card.billDay) || 1,
-    dueDay: Number(card.dueDay) || 1,
+    billDay: Math.min(31, Math.max(1, Number(card.billDay) || 1)),
+    dueDay: Math.min(31, Math.max(1, Number(card.dueDay) || 1)),
     cardType: card.cardType || "normal",
     isCleared: debt <= 0.005 || remainingBilled <= 0.005
   };
